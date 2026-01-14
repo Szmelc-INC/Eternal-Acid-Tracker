@@ -1,3 +1,5 @@
 .code/
 .parcel-cache/
 *.log
+.LOCAL/
+nohup.out
