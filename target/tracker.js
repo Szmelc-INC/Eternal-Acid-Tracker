@@ -378,7 +378,7 @@ function start() {
     }
     function updateDisplay() {
         const code = save(state);
-        display.setPatterns(patterns, code, { enabled: settings.trackEnabled, volumes: settings.trackVolumes });
+        display.setPatterns(patterns, code, { enabled: settings.trackEnabled, volumes: settings.trackVolumes, synths: settings.trackSynths });
         recordHistory(code);
     }
     function afterDisplayUpdate() {
@@ -412,6 +412,7 @@ function start() {
             sel.onchange = () => {
                 var _a, _b, _c, _d;
                 const val = sel.value;
+                stopTrack(idx);
                 settings.trackSynths[idx] = val;
                 // rebuild synths to apply new instrument immediately
                 synths = [

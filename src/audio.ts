@@ -77,7 +77,7 @@ function Audio(ctx: AudioContext) {
             towards(gain, level * sustain * vol, decay);
         }
         function noteOff() {
-            slide(gain, 0, release);
+            set(gain, 0);
         }
         function play(note: Note) {
             if (note.note === "---") {
@@ -159,7 +159,7 @@ function Audio(ctx: AudioContext) {
             towards(gain, level * sustain * vol, decay);
         }
         function noteOff() {
-            slide(gain, 0, release);
+            set(gain, 0);
         }
         function play(note: Note) {
             if (note.note === "---") {
@@ -197,7 +197,7 @@ function Audio(ctx: AudioContext) {
             gain.gain.setTargetAtTime(level * sustain * vol * (invert ? -1 : 1), ctx.currentTime, decay);
         }
         function noteOff() {
-            gain.gain.setTargetAtTime(0, ctx.currentTime, release);
+            gain.gain.setValueAtTime(0, ctx.currentTime);
         }
         function play(note: Note) {
             if (note.note === "---") {
