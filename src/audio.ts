@@ -43,7 +43,7 @@ function Audio(ctx: AudioContext) {
         }
     }
 
-    function SquareSynth(pan: number = 0): Synth<Note> {
+    function SquareSynth(pan: number = 0, volumeRef: () => number = () => 1): Synth<Note> {
         const set = (a: AudioParam, v: number) => {a.cancelScheduledValues(ctx.currentTime); a.setValueAtTime(v, ctx.currentTime); };
         const towards = (a: AudioParam, v: number, t: number) => {a.setTargetAtTime(t, ctx.currentTime, t)};
         const slide = (a: AudioParam, v: number, t: number) => {a.cancelScheduledValues(ctx.currentTime); a.setTargetAtTime(v,ctx.currentTime, t)};
@@ -72,8 +72,9 @@ function Audio(ctx: AudioContext) {
         function noteOn(note: number, glide: number = 0) {
             const glideTime = glide/10;
             slide(freq, A0Frequency * 2 ** (note / 12), glideTime);
-            set(gain, level);
-            towards(gain, level * sustain, decay);
+            const vol = Math.max(0, volumeRef());
+            set(gain, level * vol);
+            towards(gain, level * sustain * vol, decay);
         }
         function noteOff() {
             slide(gain, 0, release);
@@ -103,7 +104,7 @@ function Audio(ctx: AudioContext) {
         return curve;
     }
 
-    function AcidSynth(pan: number = 0): Synth<Note> {
+    function AcidSynth(pan: number = 0, volumeRef: () => number = () => 1): Synth<Note> {
         const set = (a: AudioParam, v: number) => {a.cancelScheduledValues(ctx.currentTime); a.setValueAtTime(v, ctx.currentTime); };
         const towards = (a: AudioParam, v: number, t: number) => {a.setTargetAtTime(v, ctx.currentTime, t)};
         const slide = (a: AudioParam, v: number, t: number) => {a.cancelScheduledValues(ctx.currentTime); a.setTargetAtTime(v,ctx.currentTime, t)};
@@ -153,8 +154,9 @@ function Audio(ctx: AudioContext) {
             set(cutoff, baseCutoff + envAmount);
             towards(cutoff, baseCutoff + envAmount * 0.2, decay);
 
-            set(gain, level);
-            towards(gain, level * sustain, decay);
+            const vol = Math.max(0, volumeRef());
+            set(gain, level * vol);
+            towards(gain, level * sustain * vol, decay);
         }
         function noteOff() {
             slide(gain, 0, release);
@@ -173,7 +175,44 @@ function Audio(ctx: AudioContext) {
         return {play}
     }
 
-    function DrumSynth(): Synth<Drum> {
+    function OscSynth(kind: OscillatorType, pan: number = 0, volumeRef: () => number = () => 1, invert: boolean = false): Synth<Note> {
+        const osc = oscillatorNode(kind);
+        const gain = gainNode(0);
+        const panner = stereoPannerNode(pan);
+        if (invert) gain.gain.value = -gain.gain.value;
+        osc.start();
+        osc.connect(gain);
+        gain.connect(panner);
+        panner.connect(ctx.destination);
+
+        const set = (a: AudioParam, v: number) => {a.cancelScheduledValues(ctx.currentTime); a.setValueAtTime(v, ctx.currentTime); };
+        const slide = (a: AudioParam, v: number, t: number) => {a.cancelScheduledValues(ctx.currentTime); a.setTargetAtTime(v,ctx.currentTime, t)};
+
+        const decay = 0.05, sustain = 0.65, release = 0.04, level = 0.14;
+
+        function noteOn(note: number) {
+            slide(osc.frequency, A0Frequency * 2 ** (note / 12), 0.01);
+            const vol = Math.max(0, volumeRef());
+            set(gain.gain, level * vol * (invert ? -1 : 1));
+            gain.gain.setTargetAtTime(level * sustain * vol * (invert ? -1 : 1), ctx.currentTime, decay);
+        }
+        function noteOff() {
+            gain.gain.setTargetAtTime(0, ctx.currentTime, release);
+        }
+        function play(note: Note) {
+            if (note.note === "---") {
+                noteOff();
+            } else if (note.note !== 'cont') {
+                noteOn(note.note);
+            }
+        }
+
+        return {play};
+    }
+
+    return {SquareSynth, AcidSynth, DrumSynth, OscSynth}
+
+    function DrumSynth(volumeRef: () => number = () => 1): Synth<Drum> {
         const toneOscillator = oscillatorNode("square", 55),
             toneGain = gainNode(),
             noiseWavetableTrigger = oscillatorNode("sawtooth", 20),
@@ -194,7 +233,7 @@ function Audio(ctx: AudioContext) {
 
 
         function play(slot: Drum) {
-            const vel = slot.vel ? slot.vel : 1;
+            const vel = (slot.vel ? slot.vel : 1) * Math.max(0, volumeRef());
             if (slot.drum === 'KCK') {
                 toneOscillator.detune.cancelScheduledValues(ctx.currentTime);
                 toneOscillator.detune.setValueAtTime(3000, ctx.currentTime);

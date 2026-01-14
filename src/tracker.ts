@@ -12,6 +12,160 @@ import * as music from './theory.js'
 import * as Generators from './generators.js'
 
 const PatternSize = 64;
+const STORAGE_KEY = 'autotracker:v1';
+
+function stripJsonComments(text: string) {
+    // removes // and /* */ outside of strings; simple, not perfect but sufficient for controlled JSONC input
+    const stringRegex = /"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'/g;
+    const placeholders: string[] = [];
+    const withoutStrings = text.replace(stringRegex, (m) => {
+        placeholders.push(m);
+        return `__STR_PLACEHOLDER_${placeholders.length - 1}__`;
+    });
+    const withoutComments = withoutStrings
+        .replace(/\/\*[^]*?\*\//g, '')
+        .replace(/(^|[^:])\/\/.*$/gm, '$1');
+    return withoutComments.replace(/__STR_PLACEHOLDER_(\d+)__/g, (_, i) => placeholders[parseInt(i, 10)]);
+}
+
+function parseJsonc<T>(text: string, fallback: T): T {
+    try {
+        const stripped = stripJsonComments(text);
+        const parsed = JSON.parse(stripped);
+        return parsed as T;
+    } catch (e) {
+        console.warn('JSONC parse failed, reverting to fallback', e);
+        return fallback;
+    }
+}
+
+function markdownToHtml(md: string): string {
+    const lines = md.replace(/\r\n?/g, '\n').split('\n');
+    let html = '';
+    let inList = false;
+    const flushList = () => {
+        if (inList) {
+            html += '</ul>';
+            inList = false;
+        }
+    };
+    lines.forEach((line) => {
+        const heading = line.match(/^(#{1,3})\s+(.*)$/);
+        if (heading) {
+            flushList();
+            const level = heading[1].length;
+            html += `<h${level}>${heading[2]}</h${level}>`;
+            return;
+        }
+        const listItem = line.match(/^\s*[-*]\s+(.*)$/);
+        if (listItem) {
+            if (!inList) {
+                html += '<ul>';
+                inList = true;
+            }
+            html += `<li>${listItem[1]}</li>`;
+            return;
+        }
+        flushList();
+        if (line.trim() === '') {
+            html += '<p></p>';
+            return;
+        }
+        const withLinks = line.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m, text, url) => `<a href="${url}" target="_blank" rel="noopener noreferrer">${text}</a>`);
+        html += `<p>${withLinks}</p>`;
+    });
+    flushList();
+    return html;
+}
+
+type StoredState = {
+    version: number;
+    settings: any;
+    advanced: any;
+    history: string[];
+    favorites: { code: SaveCode; settings: any; createdAt: number }[];
+    seed?: string;
+};
+
+const defaultStoredState: StoredState = {
+    version: 1,
+    settings: {
+        keyOverride: null,
+        minOctave: -3,
+        maxOctave: 7,
+        noteMask: new Array(12).fill(false).map((_, i) => [0,2,3,5,7,8,10].includes(i)),
+        tempo: 1,
+        trackEnabled: [true, true, true, true, true],
+        trackVolumes: [1,1,1,1,1],
+        trackSynths: ["acid8","acid8","acid8","acid8","drums"],
+        locks: {
+            key: false,
+            rangeMin: false,
+            rangeMax: false,
+            bpm: false,
+            tempo: false,
+            keys: false,
+            tracks: false
+        }
+    },
+    advanced: {
+        randomizeEveryLoops: 2,
+        randomize: {
+            key: true,
+            bpm: true,
+            tempo: true,
+            range: true,
+            keys: true,
+            tracks: true,
+            progression: true
+        },
+        bpm: { min: 70, max: 160 },
+        tempo: { min: 0.75, max: 1.25 },
+        rangeMinChoices: [-4, -3, -2, -1, 0, 1],
+        rangeMaxChoices: [2, 3, 4, 5, 6, 7, 8],
+        synth: {
+            type: "acid8" as const,
+            drive: 260,
+            filterQ: 14,
+            level: 0.22
+        },
+        theme: {
+            accent: "darkorange",
+            border: "#6699FF",
+            highlight: "#339933"
+        }
+    },
+    history: [],
+    favorites: [],
+    seed: undefined
+};
+
+function loadStored(): StoredState {
+    try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) return JSON.parse(JSON.stringify(defaultStoredState));
+        const parsed = JSON.parse(raw) as StoredState;
+        return {
+            ...JSON.parse(JSON.stringify(defaultStoredState)),
+            ...parsed,
+            settings: { ...defaultStoredState.settings, ...(parsed.settings || {}) },
+            advanced: { ...defaultStoredState.advanced, ...(parsed.advanced || {}) },
+            history: Array.isArray(parsed.history) ? parsed.history : [],
+            favorites: Array.isArray(parsed.favorites) ? parsed.favorites : []
+        };
+    } catch (e) {
+        console.warn('Failed to load stored state, using defaults', e);
+        return JSON.parse(JSON.stringify(defaultStoredState));
+    }
+}
+
+function persistStored(state: StoredState) {
+    try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    } catch (e) {
+        console.warn('Failed to persist state', e);
+    }
+}
 
 const progressions = [
     [1,1,1,1,6,6,6,6,4,4,4,4,3,3,5,5],
@@ -128,24 +282,37 @@ function mutateState(state: State): void {
 
 function start() {
     const seedOrSave = (document.getElementById("seed-text") as HTMLInputElement).value;
-    const state: State = createInitialState(seedOrSave);
-    const settings = {
-        keyOverride: null as Key | null,
-        minOctave: -2,
-        maxOctave: 6,
-        noteMask: new Array(12).fill(true),
-        tempo: 1,
-        trackEnabled: [true, true, true, true, true],
-        locks: {
-            key: false,
-            rangeMin: false,
-            rangeMax: false,
-            bpm: false,
-            tempo: false,
-            keys: false,
-            tracks: false
+    const stored = loadStored();
+    const state: State = createInitialState(seedOrSave || stored.seed || '');
+    const settings = JSON.parse(JSON.stringify({
+        ...defaultStoredState.settings,
+        ...stored.settings,
+        trackVolumes: stored.settings.trackVolumes ?? defaultStoredState.settings.trackVolumes,
+        trackSynths: stored.settings.trackSynths ?? defaultStoredState.settings.trackSynths
+    }));
+
+    const favorites: { code: SaveCode; settings: any; createdAt: number }[] = [...stored.favorites];
+
+    const defaultAdvancedConfig = JSON.parse(JSON.stringify({
+        ...defaultStoredState.advanced,
+        trackSynths: [
+            { type: "acid8", detune: -0.25, drive: 260, filterQ: 14, level: 0.22 },
+            { type: "acid8", detune: 0, drive: 230, filterQ: 12, level: 0.2 },
+            { type: "acid8", detune: 0.25, drive: 260, filterQ: 14, level: 0.22 },
+            { type: "acid8", detune: 0.5, drive: 260, filterQ: 14, level: 0.22 },
+            { type: "drums", level: 0.3 }
+        ],
+        layout: {
+            trackSpacingPx: 25,
+            trackHeaderScale: 2,
+            trackBorderColor: "rgba(102,153,255,0.4)",
+            trackBackground: "rgba(0,0,0,0.25)"
         }
-    };
+    }));
+    let advancedConfig = JSON.parse(JSON.stringify({
+        ...defaultAdvancedConfig,
+        ...stored.advanced
+    }));
 
     let patterns = [[],[],[],[],[]] as PatternsType<FourChannelsPlusDrums>;
 
@@ -156,12 +323,27 @@ function start() {
     const ctx: AudioContext = new (window.AudioContext || window.webkitAudioContext)() as AudioContext;
     const au = Audio(ctx);
 
-    const synths: SynthsType<FourChannelsPlusDrums> = [
-        au.AcidSynth(),
-        au.AcidSynth(-0.5),
-        au.AcidSynth(),
-        au.AcidSynth(0.5),
-        au.DrumSynth()
+    function buildSynth(type: string, pan: number, volRef: () => number, isDrum: boolean) {
+        if (isDrum) return au.DrumSynth(volRef);
+        switch (type) {
+            case 'square': return au.SquareSynth(pan, volRef);
+            case 'acid8':
+            case 'acid':
+            case 'bass': return au.AcidSynth(pan, volRef);
+            case 'sine': return (au as any).OscSynth('sine', pan, volRef);
+            case 'triangle': return (au as any).OscSynth('triangle', pan, volRef);
+            case 'saw': return (au as any).OscSynth('sawtooth', pan, volRef);
+            case 'rev-saw': return (au as any).OscSynth('sawtooth', pan, volRef, true);
+            default: return au.SquareSynth(pan, volRef);
+        }
+    }
+
+    let synths: SynthsType<FourChannelsPlusDrums> = [
+        buildSynth(settings.trackSynths?.[0] || 'acid8', 0, () => settings.trackVolumes?.[0] ?? 1, false) as any,
+        buildSynth(settings.trackSynths?.[1] || 'acid8', -0.5, () => settings.trackVolumes?.[1] ?? 1, false) as any,
+        buildSynth(settings.trackSynths?.[2] || 'acid8', 0, () => settings.trackVolumes?.[2] ?? 1, false) as any,
+        buildSynth(settings.trackSynths?.[3] || 'acid8', 0.5, () => settings.trackVolumes?.[3] ?? 1, false) as any,
+        buildSynth('drums', 0, () => settings.trackVolumes?.[4] ?? 1, true) as any
     ];
 
     function currentContext(): { progression: Progression, key: Key, scale: Scale, minOctave: number, maxOctave: number, noteMask: boolean[] } {
@@ -173,6 +355,32 @@ function start() {
             maxOctave: settings.maxOctave,
             noteMask: settings.noteMask
         };
+    }
+
+    function safeRange(range: {min?: number|null, max?: number|null}|undefined, fallback: {min: number, max: number}) {
+        const min = Number((range && range.min) ?? NaN);
+        const max = Number((range && range.max) ?? NaN);
+        if (!Number.isFinite(min) || !Number.isFinite(max)) return {...fallback};
+        if (min === max) return {min, max};
+        if (min > max) return {min: max, max: min};
+        return {min, max};
+    }
+
+    function clampToOptions(select: HTMLSelectElement, value: number) {
+        const opts = Array.from(select.options)
+            .map((o) => parseInt(o.value, 10))
+            .filter((v) => Number.isFinite(v));
+        if (!opts.length) return value;
+        const min = Math.min(...opts);
+        const max = Math.max(...opts);
+        if (!Number.isFinite(value)) return min;
+        return Math.min(max, Math.max(min, value));
+    }
+
+    function ensureOctave(value: any, fallback: number) {
+        const n = Number(value);
+        if (!Number.isFinite(n)) return fallback;
+        return Math.max(-5, Math.min(10, Math.round(n)));
     }
 
     function newPatterns() {
@@ -187,30 +395,104 @@ function start() {
         ];
     }
 
-    const history: string[] = [];
+    const history: string[] = [...stored.history];
+    let selectedHistories = new Set<string>();
+    let selectedFavorites = new Set<number>();
     const historyList = document.getElementById("history-list");
+    const historyPopup = document.getElementById("history-popup");
+    const historyPopupList = document.getElementById("history-popup-list");
+    const historyPopupClose = document.getElementById("history-popup-close") as HTMLButtonElement | null;
+
+    function persistState() {
+        const snapshot: StoredState = {
+            version: 1,
+            settings,
+            advanced: advancedConfig,
+            history,
+            favorites,
+            seed: state.seedCode
+        };
+        persistStored(snapshot);
+    }
+    function renderHistory() {
+        const renderList = (el: HTMLElement | null) => {
+            if (!el) return;
+            el.innerHTML = history.map((entry) => `<li data-code="${entry}" class='${selectedHistories.has(entry) ? "selected" : ""}'>${entry}</li>`).join("");
+        };
+        renderList(historyList);
+        renderList(historyPopupList);
+    }
+
     function recordHistory(code: SaveCode) {
         if (history[0] !== code) {
             history.unshift(code);
             if (history.length > 100) history.length = 100;
         }
-        if (historyList) {
-            historyList.innerHTML = history.map((entry) => `<li>${entry}</li>`).join("");
-        }
+        renderHistory();
+        persistState();
     }
 
     function updateDisplay() {
         const code = save(state);
-        display.setPatterns(patterns, code);
+        display.setPatterns(patterns, code, {enabled: settings.trackEnabled, volumes: settings.trackVolumes});
         recordHistory(code);
+    }
+
+    function afterDisplayUpdate() {
+        const muteButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('.track-mute'));
+        muteButtons.forEach((btn) => {
+            const idx = parseInt(btn.dataset.track || '0', 10);
+            btn.textContent = settings.trackEnabled[idx] ? 'Mute' : 'Unmute';
+            btn.onclick = () => {
+                settings.trackEnabled[idx] = !settings.trackEnabled[idx];
+                if (trackToggles[idx]) trackToggles[idx]!.checked = settings.trackEnabled[idx];
+                applySettings();
+            };
+        });
+        const volSliders = Array.from(document.querySelectorAll<HTMLInputElement>('.track-volume'));
+        volSliders.forEach((slider) => {
+            const idx = parseInt(slider.dataset.track || '0', 10);
+            const vol = Math.max(0, Math.min(1, settings.trackVolumes[idx] ?? 1));
+            slider.value = String(Math.round(vol * 100));
+            slider.addEventListener('input', () => {
+                const v = Math.max(0, Math.min(100, parseInt(slider.value, 10) || 0));
+                settings.trackVolumes[idx] = v / 100;
+                persistState();
+            });
+        });
+        const synthSelects = Array.from(document.querySelectorAll<HTMLSelectElement>('.track-synth'));
+        synthSelects.forEach((sel) => {
+            const idx = parseInt(sel.dataset.track || '0', 10);
+            sel.value = settings.trackSynths[idx] || (idx === 4 ? 'drums' : 'acid8');
+            sel.onchange = () => {
+                const val = sel.value;
+                settings.trackSynths[idx] = val;
+                // rebuild synths to apply new instrument immediately
+                synths = [
+                    buildSynth(settings.trackSynths?.[0] || 'acid8', 0, () => settings.trackVolumes?.[0] ?? 1, false) as any,
+                    buildSynth(settings.trackSynths?.[1] || 'acid8', -0.5, () => settings.trackVolumes?.[1] ?? 1, false) as any,
+                    buildSynth(settings.trackSynths?.[2] || 'acid8', 0, () => settings.trackVolumes?.[2] ?? 1, false) as any,
+                    buildSynth(settings.trackSynths?.[3] || 'acid8', 0.5, () => settings.trackVolumes?.[3] ?? 1, false) as any,
+                    buildSynth('drums', 0, () => settings.trackVolumes?.[4] ?? 1, true) as any
+                ];
+                stopTrack(idx);
+                persistState();
+            };
+        });
     }
 
     // create initial patterns
     newPatterns();
     updateDisplay();
+    afterDisplayUpdate();
 
     const silentNote = {note: '---'} as Note;
     const silentDrum = {drum: '---'} as Drum;
+
+    function stopTrack(idx: number) {
+        const isDrum = idx === 4;
+        synths[idx]?.play(isDrum ? silentDrum : silentNote as any);
+    }
 
     function effectiveBpm() {
         return Math.max(40, Math.round(state.bpm * settings.tempo));
@@ -259,12 +541,37 @@ function start() {
     const randomizeButton = document.getElementById("randomize") as HTMLButtonElement | null;
     const playToggle = document.getElementById("play-toggle") as HTMLButtonElement | null;
     const infoToggle = document.getElementById("info-toggle") as HTMLButtonElement | null;
+    const howtoToggle = document.getElementById("howto-toggle") as HTMLButtonElement | null;
     const infoPopup = document.getElementById("info-popup");
     const infoClose = document.getElementById("info-close") as HTMLButtonElement | null;
     const minimizeToggle = document.getElementById("minimize-toggle") as HTMLButtonElement | null;
     const settingsPanel = document.getElementById("settings-panel");
     const historyToggle = document.getElementById("history-toggle") as HTMLButtonElement | null;
     const historyPanel = document.getElementById("history-panel");
+    const favoritesToggle = document.getElementById("favorites-toggle") as HTMLButtonElement | null;
+    const favoritesPanel = document.getElementById("favorites-panel");
+    const favoritesClose = document.getElementById("favorites-close") as HTMLButtonElement | null;
+    const favoritesList = document.getElementById("favorites-list");
+    const favoritesExport = document.getElementById("favorites-export") as HTMLButtonElement | null;
+    const favoritesImport = document.getElementById("favorites-import") as HTMLButtonElement | null;
+    const favoritesCopy = document.getElementById("favorites-copy") as HTMLButtonElement | null;
+    const favoritesRemove = document.getElementById("favorites-remove") as HTMLButtonElement | null;
+    const advancedExport = document.getElementById("advanced-export") as HTMLButtonElement | null;
+    const advancedImport = document.getElementById("advanced-import") as HTMLButtonElement | null;
+    const advancedImportFile = document.getElementById("advanced-import-file") as HTMLInputElement | null;
+    const howtoPopup = document.getElementById("howto-popup");
+    const howtoClose = document.getElementById("howto-close") as HTMLButtonElement | null;
+    const howtoBody = document.getElementById("howto-body");
+    const historyExport = document.getElementById("history-export") as HTMLButtonElement | null;
+    const historyImport = document.getElementById("history-import") as HTMLButtonElement | null;
+    const historyCopy = document.getElementById("history-copy") as HTMLButtonElement | null;
+    const historyRemove = document.getElementById("history-remove") as HTMLButtonElement | null;
+    const advancedToggle = document.getElementById("advanced-toggle") as HTMLButtonElement | null;
+    const advancedPopup = document.getElementById("advanced-popup");
+    const advancedText = document.getElementById("advanced-text") as HTMLTextAreaElement | null;
+    const advancedSave = document.getElementById("advanced-save") as HTMLButtonElement | null;
+    const advancedCancel = document.getElementById("advanced-cancel") as HTMLButtonElement | null;
+    const advancedReset = document.getElementById("advanced-reset") as HTMLButtonElement | null;
     const lockKey = document.getElementById("lock-key") as HTMLInputElement | null;
     const lockRangeMin = document.getElementById("lock-range-min") as HTMLInputElement | null;
     const lockRangeMax = document.getElementById("lock-range-max") as HTMLInputElement | null;
@@ -272,6 +579,14 @@ function start() {
     const lockTempo = document.getElementById("lock-tempo") as HTMLInputElement | null;
     const lockKeys = document.getElementById("lock-keys") as HTMLInputElement | null;
     const lockTracks = document.getElementById("lock-tracks") as HTMLInputElement | null;
+    const lockPane = document.getElementById("lock-pane");
+    const lockPaneKey = document.getElementById("lock-pane-key") as HTMLInputElement | null;
+    const lockPaneRangeMin = document.getElementById("lock-pane-range-min") as HTMLInputElement | null;
+    const lockPaneRangeMax = document.getElementById("lock-pane-range-max") as HTMLInputElement | null;
+    const lockPaneBpm = document.getElementById("lock-pane-bpm") as HTMLInputElement | null;
+    const lockPaneTempo = document.getElementById("lock-pane-tempo") as HTMLInputElement | null;
+    const lockPaneKeys = document.getElementById("lock-pane-keys") as HTMLInputElement | null;
+    const lockPaneTracks = document.getElementById("lock-pane-tracks") as HTMLInputElement | null;
     const trackToggles = [
         document.getElementById("track-1") as HTMLInputElement | null,
         document.getElementById("track-2") as HTMLInputElement | null,
@@ -279,6 +594,23 @@ function start() {
         document.getElementById("track-4") as HTMLInputElement | null,
         document.getElementById("track-5") as HTMLInputElement | null
     ];
+
+    function syncLockPane() {
+        if (!lockPane) return;
+        lockPane.style.display = settingsPanel && !settingsPanel.classList.contains("minimized") ? "block" : "none";
+        const map = [
+            [lockPaneKey, lockKey, "key"],
+            [lockPaneRangeMin, lockRangeMin, "rangeMin"],
+            [lockPaneRangeMax, lockRangeMax, "rangeMax"],
+            [lockPaneBpm, lockBpm, "bpm"],
+            [lockPaneTempo, lockTempo, "tempo"],
+            [lockPaneKeys, lockKeys, "keys"],
+            [lockPaneTracks, lockTracks, "tracks"]
+        ] as const;
+        map.forEach(([pane, main]) => {
+            if (pane && main) pane.checked = main.checked;
+        });
+    }
 
     function applySettings(options: { bpm?: boolean; tempo?: boolean } = {}) {
         if (lockKey) settings.locks.key = lockKey.checked;
@@ -289,9 +621,13 @@ function start() {
         if (lockKeys) settings.locks.keys = lockKeys.checked;
         if (lockTracks) settings.locks.tracks = lockTracks.checked;
 
+        syncLockPane();
+
         if (minOctaveSelect && maxOctaveSelect) {
-            if (!settings.locks.rangeMin) settings.minOctave = parseInt(minOctaveSelect.value, 10);
-            if (!settings.locks.rangeMax) settings.maxOctave = parseInt(maxOctaveSelect.value, 10);
+            if (!settings.locks.rangeMin) settings.minOctave = ensureOctave(minOctaveSelect.value, settings.minOctave);
+            if (!settings.locks.rangeMax) settings.maxOctave = ensureOctave(maxOctaveSelect.value, settings.maxOctave);
+            settings.minOctave = clampToOptions(minOctaveSelect, settings.minOctave);
+            settings.maxOctave = clampToOptions(maxOctaveSelect, settings.maxOctave);
             if (settings.maxOctave < settings.minOctave) {
                 const t = settings.maxOctave;
                 settings.maxOctave = settings.minOctave;
@@ -335,6 +671,7 @@ function start() {
             if (!toggle) return;
             if (!settings.locks.tracks) {
                 settings.trackEnabled[i] = toggle.checked;
+                if (!settings.trackEnabled[i]) stopTrack(i);
             } else {
                 toggle.checked = settings.trackEnabled[i];
             }
@@ -347,22 +684,24 @@ function start() {
         if (tempoSlider) tempoSlider.disabled = settings.locks.tempo;
         newPatterns();
         updateDisplay();
+        afterDisplayUpdate();
         if (playing) {
             clock.set(effectiveBpm(), frame);
         }
+        persistState();
     }
 
     if (keySelect) {
         keySelect.value = String(settings.keyOverride ?? state.key);
-        keySelect.addEventListener("change", applySettings);
+        keySelect.addEventListener("change", () => applySettings());
     }
     if (minOctaveSelect) {
         minOctaveSelect.value = String(settings.minOctave);
-        minOctaveSelect.addEventListener("change", applySettings);
+        minOctaveSelect.addEventListener("change", () => applySettings());
     }
     if (maxOctaveSelect) {
         maxOctaveSelect.value = String(settings.maxOctave);
-        maxOctaveSelect.addEventListener("change", applySettings);
+        maxOctaveSelect.addEventListener("change", () => applySettings());
     }
     if (bpmSlider) {
         bpmSlider.value = String(state.bpm);
@@ -378,45 +717,71 @@ function start() {
         const inputs = Array.from(noteGrid.querySelectorAll("input[type='checkbox']")) as HTMLInputElement[];
         inputs.forEach((input, i) => {
             input.checked = settings.noteMask[i] ?? true;
-            input.addEventListener("change", applySettings);
+            input.addEventListener("change", () => applySettings());
         });
     }
     trackToggles.forEach((toggle, i) => {
         if (!toggle) return;
         toggle.checked = settings.trackEnabled[i];
-        toggle.addEventListener("change", applySettings);
+        toggle.addEventListener("change", () => applySettings());
     });
     [lockKey, lockRangeMin, lockRangeMax, lockBpm, lockTempo, lockKeys, lockTracks].forEach((lock) => {
         if (!lock) return;
-        lock.addEventListener("change", applySettings);
+        lock.addEventListener("change", () => applySettings());
+    });
+
+    [
+        [lockPaneKey, lockKey],
+        [lockPaneRangeMin, lockRangeMin],
+        [lockPaneRangeMax, lockRangeMax],
+        [lockPaneBpm, lockBpm],
+        [lockPaneTempo, lockTempo],
+        [lockPaneKeys, lockKeys],
+        [lockPaneTracks, lockTracks]
+    ].forEach(([pane, main]) => {
+        if (!pane || !main) return;
+        pane.addEventListener("change", () => {
+            main.checked = pane.checked;
+            applySettings();
+        });
     });
     if (randomizeButton) {
         randomizeButton.addEventListener("click", () => {
-            if (!settings.locks.key) {
-                state.key = rndInt(12) as Key;
+            // Prefer heavy/low defaults and minor-ish note masks (D minor by default key=5)
+            if (advancedConfig.randomize.key && !settings.locks.key) {
+                state.key = choose([5, 5, 5, 0, 10, 3]) as Key;
                 settings.keyOverride = state.key;
             }
-            state.scale = music.scales.major;
-            state.progression = choose(progressions);
-            if (!settings.locks.bpm) {
-                state.bpm = Math.floor(rnd() * 90) + 80;
+            if (advancedConfig.randomize.progression) {
+                state.scale = music.scales.minor;
+                state.progression = choose(progressions);
             }
-            if (!settings.locks.rangeMin) settings.minOctave = choose([-2,-1,0,1]) as number;
-            if (!settings.locks.rangeMax) settings.maxOctave = choose([2,3,4,5,6]) as number;
+            if (advancedConfig.randomize.bpm && !settings.locks.bpm) {
+                const {min, max} = safeRange(advancedConfig.bpm, defaultAdvancedConfig.bpm);
+                state.bpm = Math.floor(rnd() * (max - min + 1)) + min;
+            }
+            const rangeMinChoices = (advancedConfig.rangeMinChoices || defaultAdvancedConfig.rangeMinChoices).filter((v: any) => Number.isFinite(v));
+            const rangeMaxChoices = (advancedConfig.rangeMaxChoices || defaultAdvancedConfig.rangeMaxChoices).filter((v: any) => Number.isFinite(v));
+            if (advancedConfig.randomize.range && !settings.locks.rangeMin && rangeMinChoices.length) settings.minOctave = ensureOctave(choose(rangeMinChoices), settings.minOctave);
+            if (advancedConfig.randomize.range && !settings.locks.rangeMax && rangeMaxChoices.length) settings.maxOctave = ensureOctave(choose(rangeMaxChoices), settings.maxOctave);
             if (settings.maxOctave < settings.minOctave) {
                 const t = settings.maxOctave;
                 settings.maxOctave = settings.minOctave;
                 settings.minOctave = t;
             }
-            if (!settings.locks.tempo) settings.tempo = (Math.floor(rnd() * 51) + 75) / 100;
-            if (!settings.locks.keys) {
-                settings.noteMask = new Array(12).fill(false).map(() => rnd() > 0.25);
+            if (advancedConfig.randomize.tempo && !settings.locks.tempo) {
+                const {min, max} = safeRange(advancedConfig.tempo, defaultAdvancedConfig.tempo);
+                settings.tempo = Math.round((min + rnd() * (max - min)) * 100) / 100;
+            }
+            if (advancedConfig.randomize.keys && !settings.locks.keys) {
+                settings.noteMask = new Array(12).fill(false).map((_, i) => [0,2,3,5,7,8,10].includes(i) ? rnd() > 0.1 : rnd() > 0.75);
                 if (!settings.noteMask.some(Boolean)) {
                     settings.noteMask[0] = true;
                     settings.noteMask[5] = true;
                 }
             }
-            if (!settings.locks.tracks) settings.trackEnabled = settings.trackEnabled.map(() => rnd() > 0.1);
+            if (advancedConfig.randomize.tracks && !settings.locks.tracks) settings.trackEnabled = settings.trackEnabled.map(() => rnd() > 0.1);
+            settings.trackEnabled.forEach((enabled: boolean, idx: number) => { if (!enabled) stopTrack(idx); });
 
             if (keySelect) keySelect.value = String(settings.keyOverride ?? state.key);
             if (minOctaveSelect) minOctaveSelect.value = String(settings.minOctave);
@@ -475,13 +840,429 @@ function start() {
     if (minimizeToggle && settingsPanel) {
         minimizeToggle.addEventListener("click", () => {
             settingsPanel.classList.toggle("minimized");
+            syncLockPane();
         });
     }
     if (historyToggle && historyPanel) {
         historyToggle.addEventListener("click", () => {
-            historyPanel.style.display = historyPanel.style.display === "block" ? "none" : "block";
+            if (historyPopup) {
+                historyPopup.style.display = historyPopup.style.display === "block" ? "none" : "block";
+            } else {
+                historyPanel.style.display = historyPanel.style.display === "block" ? "none" : "block";
+            }
+            renderHistory();
         });
     }
+
+    if (historyPopupClose && historyPopup) {
+        historyPopupClose.addEventListener("click", () => {
+            historyPopup.style.display = "none";
+        });
+    }
+
+    function renderFavorites() {
+        if (!favoritesList) return;
+        favoritesList.innerHTML = favorites
+            .slice(0, 100)
+            .map((f, idx) => `<li data-index="${idx}" class='${selectedFavorites.has(idx) ? "selected" : ""}'><a href='?${f.code}' class='save-string'>${f.code}</a></li>`)
+            .join("");
+    }
+
+    function addFavorite() {
+        const code = save(state);
+        const snapshot = {
+            keyOverride: settings.keyOverride,
+            minOctave: settings.minOctave,
+            maxOctave: settings.maxOctave,
+            noteMask: settings.noteMask,
+            tempo: settings.tempo,
+            trackEnabled: settings.trackEnabled,
+            trackVolumes: settings.trackVolumes,
+            locks: settings.locks
+        };
+        const existing = favorites.findIndex((f) => f.code === code);
+        if (existing >= 0) favorites.splice(existing, 1);
+        favorites.unshift({code, settings: snapshot, createdAt: Date.now()});
+        if (favorites.length > 100) favorites.length = 100;
+        renderFavorites();
+        persistState();
+    }
+
+    // favorite button exists inside the display header; ensure it's bound after each redraw
+    afterDisplayUpdate();
+
+    // delegate click for favorite button to survive rerenders
+    const displayRoot = document.getElementById("display");
+    if (displayRoot) {
+        displayRoot.addEventListener('click', (e) => {
+            const target = e.target as HTMLElement;
+            if (target && target.id === 'favorite-current') {
+                addFavorite();
+            }
+        });
+    }
+
+    function selectHistory(code: string | null, multi: boolean) {
+        if (!code) { selectedHistories.clear(); renderHistory(); return; }
+        if (multi) {
+            if (selectedHistories.has(code)) selectedHistories.delete(code); else selectedHistories.add(code);
+        } else {
+            selectedHistories = new Set([code]);
+        }
+        renderHistory();
+    }
+    function selectFavorite(idx: number | null, multi: boolean) {
+        if (idx === null || idx < 0) { selectedFavorites.clear(); renderFavorites(); return; }
+        if (multi) {
+            if (selectedFavorites.has(idx)) selectedFavorites.delete(idx); else selectedFavorites.add(idx);
+        } else {
+            selectedFavorites = new Set([idx]);
+        }
+        renderFavorites();
+    }
+
+    if (historyList) {
+        historyList.addEventListener('click', (e) => {
+            const li = (e.target as HTMLElement).closest('li');
+            if (!li) return;
+            selectHistory(li.getAttribute('data-code'), (e as MouseEvent).ctrlKey || (e as MouseEvent).metaKey);
+        });
+    }
+    if (historyPopupList) {
+        historyPopupList.addEventListener('click', (e) => {
+            const li = (e.target as HTMLElement).closest('li');
+            if (!li) return;
+            selectHistory(li.getAttribute('data-code'), (e as MouseEvent).ctrlKey || (e as MouseEvent).metaKey);
+        });
+    }
+    if (favoritesList) {
+        favoritesList.addEventListener('click', (e) => {
+            const li = (e.target as HTMLElement).closest('li');
+            if (!li) return;
+            const idx = parseInt(li.getAttribute('data-index') || '-1', 10);
+            if (idx >= 0) selectFavorite(idx, (e as MouseEvent).ctrlKey || (e as MouseEvent).metaKey);
+        });
+    }
+
+    if (favoritesToggle && favoritesPanel) {
+        favoritesToggle.addEventListener("click", () => {
+            favoritesPanel.style.display = favoritesPanel.style.display === "block" ? "none" : "block";
+            if (historyPopup && historyPopup.style.display === "block") {
+                const historyRect = historyPopup.getBoundingClientRect();
+                favoritesPanel.style.left = `${historyRect.right + 12}px`;
+                favoritesPanel.style.right = "auto";
+            } else {
+                favoritesPanel.style.left = "auto";
+                favoritesPanel.style.right = "268px";
+            }
+            renderFavorites();
+        });
+    }
+    if (favoritesClose && favoritesPanel) {
+        favoritesClose.addEventListener("click", () => {
+            favoritesPanel.style.display = "none";
+        });
+    }
+
+    function blobDownload(name: string, data: string, type = 'application/json') {
+        const blob = new Blob([data], {type});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = name;
+        a.click();
+        URL.revokeObjectURL(url);
+    }
+
+    if (historyExport) {
+        historyExport.addEventListener('click', () => {
+            if (selectedHistories.size === 0) {
+                blobDownload('history-all.json', JSON.stringify(history, null, 2));
+            } else {
+                const entries = history.filter((h) => selectedHistories.has(h));
+                blobDownload('history-selected.json', JSON.stringify(entries, null, 2));
+            }
+        });
+    }
+    if (historyCopy) {
+        historyCopy.addEventListener('click', async () => {
+            const entries = selectedHistories.size ? history.filter((h) => selectedHistories.has(h)) : history;
+            if (!entries.length) { alert('Nothing to copy'); return; }
+            try { await navigator.clipboard.writeText(entries.join('\n')); } catch { alert('Copy failed'); }
+        });
+    }
+    if (historyRemove) {
+        historyRemove.addEventListener('click', () => {
+            if (selectedHistories.size === 0) return;
+            for (const h of Array.from(selectedHistories)) {
+                const idx = history.indexOf(h);
+                if (idx >= 0) history.splice(idx,1);
+            }
+            selectedHistories.clear();
+            renderHistory();
+            persistState();
+        });
+    }
+    if (historyImport) {
+        historyImport.addEventListener('click', () => {
+            const text = prompt('Paste save code or JSON array for history');
+            if (!text) return;
+            try {
+                let entries: string[] = [];
+                try {
+                    const parsed = JSON.parse(text);
+                    if (Array.isArray(parsed)) entries = parsed.map(String);
+                } catch {
+                    entries = text.split(/\s+/).filter(Boolean);
+                }
+                entries.forEach((code) => {
+                    if (history[0] !== code) {
+                        history.unshift(code);
+                    }
+                });
+                if (history.length > 100) history.length = 100;
+                renderHistory();
+                persistState();
+            } catch (err) {
+                alert('Import failed');
+            }
+        });
+    }
+
+    if (favoritesExport) {
+        favoritesExport.addEventListener('click', () => {
+            const payload = selectedFavorites.size
+                ? favorites.filter((_, idx) => selectedFavorites.has(idx))
+                : favorites;
+            if (!payload.length) { alert('Nothing selected to export'); return; }
+            blobDownload('favorites.json', JSON.stringify(payload, null, 2));
+        });
+    }
+    if (favoritesCopy) {
+        favoritesCopy.addEventListener('click', async () => {
+            const payload = selectedFavorites.size ? favorites.filter((_, idx) => selectedFavorites.has(idx)) : favorites;
+            if (!payload.length) { alert('Nothing to copy'); return; }
+            try { await navigator.clipboard.writeText(payload.map((f) => f.code).join('\n')); } catch { alert('Copy failed'); }
+        });
+    }
+    if (favoritesRemove) {
+        favoritesRemove.addEventListener('click', () => {
+            if (selectedFavorites.size === 0) return;
+            const toRemove = new Set(selectedFavorites);
+            for (let i = favorites.length -1; i >=0; i--) {
+                if (toRemove.has(i)) favorites.splice(i,1);
+            }
+            selectedFavorites.clear();
+            renderFavorites();
+            persistState();
+        });
+    }
+    if (favoritesImport) {
+        favoritesImport.addEventListener('click', () => {
+            const text = prompt('Paste favorite JSON or save code');
+            if (!text) return;
+            try {
+                let entries: any[] = [];
+                try {
+                    const parsed = JSON.parse(text);
+                    if (Array.isArray(parsed)) entries = parsed; else entries = [parsed];
+                } catch {
+                    entries = [{code: text}];
+                }
+                entries.forEach((fav) => {
+                    if (!fav.code) return;
+                    const snapshot = fav.settings || {
+                        keyOverride: settings.keyOverride,
+                        minOctave: settings.minOctave,
+                        maxOctave: settings.maxOctave,
+                        noteMask: settings.noteMask,
+                        tempo: settings.tempo,
+                        trackEnabled: settings.trackEnabled,
+                        trackVolumes: settings.trackVolumes,
+                        locks: settings.locks
+                    };
+                    const existing = favorites.findIndex((f) => f.code === fav.code);
+                    if (existing >= 0) favorites.splice(existing,1);
+                    favorites.unshift({code: fav.code, settings: snapshot, createdAt: Date.now()});
+                });
+                if (favorites.length > 100) favorites.length = 100;
+                renderFavorites();
+                persistState();
+            } catch (err) {
+                alert('Import failed');
+            }
+        });
+    }
+
+    if (advancedExport) {
+        advancedExport.addEventListener("click", () => {
+            const payload: StoredState = {
+                version: 1,
+                settings,
+                advanced: advancedConfig,
+                history,
+                favorites,
+                seed: state.seedCode
+            };
+            const blob = new Blob([JSON.stringify(payload, null, 2)], {type: "application/json"});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'autotracker-backup.json';
+            a.click();
+            URL.revokeObjectURL(url);
+        });
+    }
+
+    if (advancedImport && advancedImportFile) {
+        advancedImport.addEventListener("click", () => advancedImportFile.click());
+        advancedImportFile.addEventListener("change", (e) => {
+            const file = (e.target as HTMLInputElement).files?.[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = () => {
+                try {
+                    const parsed = JSON.parse(String(reader.result)) as StoredState;
+                    if (!parsed || typeof parsed !== 'object') throw new Error('Invalid file');
+                    if (parsed.version !== 1) throw new Error('Unsupported version');
+                    Object.assign(settings, parsed.settings || {});
+                    advancedConfig = {
+                        ...defaultAdvancedConfig,
+                        ...(parsed.advanced || {})
+                    };
+                    history.length = 0;
+                    if (Array.isArray(parsed.history)) history.push(...parsed.history.slice(0,100));
+                    favorites.length = 0;
+                    if (Array.isArray(parsed.favorites)) favorites.push(...parsed.favorites.slice(0,100));
+                    if (parsed.seed) state.seedCode = parsed.seed;
+                    // sync UI with new settings
+                    applySettings({bpm: true, tempo: true});
+                    renderFavorites();
+                    recordHistory(save(state));
+                    persistState();
+                    alert('Import successful.');
+                } catch (err) {
+                    console.error(err);
+                    alert('Import failed: ' + (err as Error).message);
+                }
+            };
+            reader.readAsText(file);
+            // reset input for next time
+            advancedImportFile.value = '';
+        });
+    }
+
+    let howtoLoaded = false;
+    async function loadHowto() {
+        if (howtoLoaded || !howtoBody) return;
+        try {
+            const res = await fetch('HOWTO.md');
+            const text = await res.text();
+            howtoBody.innerHTML = markdownToHtml(text);
+            howtoLoaded = true;
+        } catch (err) {
+            howtoBody.innerHTML = '<p>Failed to load HOWTO.</p>';
+        }
+    }
+
+    if (infoToggle && infoPopup) {
+        infoToggle.addEventListener('click', () => {
+            infoPopup.style.display = 'flex';
+        });
+    }
+    if (howtoToggle && howtoPopup) {
+        howtoToggle.addEventListener('click', async () => {
+            await loadHowto();
+            howtoPopup.style.display = 'flex';
+        });
+    }
+    if (howtoClose && howtoPopup) {
+        howtoClose.addEventListener('click', () => {
+            howtoPopup.style.display = 'none';
+        });
+    }
+    if (howtoPopup) {
+        howtoPopup.addEventListener('click', (e) => {
+            if (e.target === howtoPopup) howtoPopup.style.display = 'none';
+        });
+    }
+
+    function advancedConfigToText(cfg: any) {
+        const payload = {
+            settings: {
+                trackVolumes: settings.trackVolumes,
+                trackEnabled: settings.trackEnabled
+            },
+            advanced: {
+                version: 1,
+                randomizeEveryLoops: cfg.randomizeEveryLoops,
+                randomize: cfg.randomize,
+                bpm: cfg.bpm,
+                tempo: cfg.tempo,
+                rangeMinChoices: cfg.rangeMinChoices,
+                rangeMaxChoices: cfg.rangeMaxChoices,
+                synth: cfg.synth,
+                trackSynths: cfg.trackSynths,
+                theme: cfg.theme,
+                layout: cfg.layout
+            }
+        };
+        return `// Advanced settings (JSONC)\n// null = use default values\n// Edit settings.trackVolumes/trackEnabled and advanced.*.\n${JSON.stringify(payload, null, 2)}`;
+    }
+    function applyAdvancedConfig(next: any) {
+        advancedConfig = {
+            ...defaultAdvancedConfig,
+            ...((next && next.advanced) || next || {})
+        };
+        if (next && next.settings) {
+            if (Array.isArray(next.settings.trackVolumes)) {
+                settings.trackVolumes = next.settings.trackVolumes.map((v: any) => Math.max(0, Math.min(1, Number(v) || 0))) as number[];
+            }
+            if (Array.isArray(next.settings.trackEnabled)) {
+                settings.trackEnabled = next.settings.trackEnabled.map((v: any) => Boolean(v));
+                trackToggles.forEach((t, i) => { if (t) t.checked = settings.trackEnabled[i] ?? true; });
+            }
+        }
+    }
+
+    if (advancedToggle && advancedPopup && advancedText) {
+        advancedToggle.addEventListener("click", () => {
+            advancedText.value = advancedConfigToText(advancedConfig);
+            advancedPopup.style.display = "flex";
+        });
+    }
+    if (advancedCancel && advancedPopup) {
+        advancedCancel.addEventListener("click", () => {
+            advancedPopup.style.display = "none";
+        });
+    }
+    if (advancedReset && advancedText) {
+        advancedReset.addEventListener("click", () => {
+            advancedConfig = JSON.parse(JSON.stringify(defaultAdvancedConfig));
+            settings.trackVolumes = [...defaultStoredState.settings.trackVolumes];
+            settings.trackEnabled = [...defaultStoredState.settings.trackEnabled];
+            advancedText.value = advancedConfigToText(advancedConfig);
+            applySettings();
+            persistState();
+        });
+    }
+    if (advancedSave && advancedPopup && advancedText) {
+        advancedSave.addEventListener("click", () => {
+            try {
+                const parsed = parseJsonc(advancedText.value, advancedConfig);
+                applyAdvancedConfig(parsed);
+                advancedPopup.style.display = "none";
+                applySettings({bpm: true, tempo: true});
+                persistState();
+            } catch (e) {
+                advancedText.value = advancedConfigToText(advancedConfig);
+                alert("Invalid JSON; reverted.");
+            }
+        });
+    }
+
+    // ensure lock pane matches on load
+    syncLockPane();
 }
 
 window.onload = function() {
