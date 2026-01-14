@@ -91,7 +91,7 @@ const defaultStoredState = {
         tempo: 1,
         trackEnabled: [true, true, true, true, true],
         trackVolumes: [1, 1, 1, 1, 1],
-        trackSynths: ["acid8", "acid8", "acid8", "acid8", "drums"],
+        trackSynths: ["bass", "acid8", "square", "triangle", "drums"],
         locks: {
             key: false,
             rangeMin: false,
@@ -111,7 +111,8 @@ const defaultStoredState = {
             range: true,
             keys: true,
             tracks: true,
-            progression: true
+            progression: true,
+            instruments: false
         },
         bpm: { min: 70, max: 160 },
         tempo: { min: 0.75, max: 1.25 },
@@ -241,17 +242,36 @@ function mutateState(state) {
     //display.setPatterns(patterns, stateString);
 }
 function start() {
-    var _a, _b, _c, _d, _e, _f, _g;
+    var _a, _b, _c;
     const seedOrSave = document.getElementById("seed-text").value;
     const stored = loadStored();
     const state = createInitialState(seedOrSave || stored.seed || '');
     const settings = JSON.parse(JSON.stringify(Object.assign(Object.assign(Object.assign({}, defaultStoredState.settings), stored.settings), { trackVolumes: (_a = stored.settings.trackVolumes) !== null && _a !== void 0 ? _a : defaultStoredState.settings.trackVolumes, trackSynths: (_b = stored.settings.trackSynths) !== null && _b !== void 0 ? _b : defaultStoredState.settings.trackSynths })));
+    function normalizeTrackSynths() {
+        const defaults = defaultStoredState.settings.trackSynths;
+        if (!Array.isArray(settings.trackSynths)) {
+            settings.trackSynths = [...defaults];
+            return;
+        }
+        settings.trackSynths = settings.trackSynths.map((v, idx) => {
+            const fallback = defaults[idx] || (idx === 4 ? 'drums' : 'acid8');
+            if (idx === 4)
+                return 'drums';
+            const val = String(v || fallback);
+            return val;
+        });
+        if (settings.trackSynths.length < defaults.length) {
+            settings.trackSynths = settings.trackSynths.concat(defaults.slice(settings.trackSynths.length));
+        }
+        settings.trackSynths = settings.trackSynths.slice(0, defaults.length);
+    }
+    normalizeTrackSynths();
     const favorites = [...stored.favorites];
     const defaultAdvancedConfig = JSON.parse(JSON.stringify(Object.assign(Object.assign({}, defaultStoredState.advanced), { trackSynths: [
-            { type: "acid8", detune: -0.25, drive: 260, filterQ: 14, level: 0.22 },
+            { type: "bass", detune: -0.25, drive: 260, filterQ: 14, level: 0.22 },
             { type: "acid8", detune: 0, drive: 230, filterQ: 12, level: 0.2 },
-            { type: "acid8", detune: 0.25, drive: 260, filterQ: 14, level: 0.22 },
-            { type: "acid8", detune: 0.5, drive: 260, filterQ: 14, level: 0.22 },
+            { type: "square", detune: 0.1, drive: 200, filterQ: 10, level: 0.18 },
+            { type: "triangle", detune: 0.2, drive: 180, filterQ: 8, level: 0.16 },
             { type: "drums", level: 0.3 }
         ], layout: {
             trackSpacingPx: 25,
@@ -281,13 +301,19 @@ function start() {
             default: return au.SquareSynth(pan, volRef);
         }
     }
-    let synths = [
-        buildSynth(((_c = settings.trackSynths) === null || _c === void 0 ? void 0 : _c[0]) || 'acid8', 0, () => { var _a, _b; return (_b = (_a = settings.trackVolumes) === null || _a === void 0 ? void 0 : _a[0]) !== null && _b !== void 0 ? _b : 1; }, false),
-        buildSynth(((_d = settings.trackSynths) === null || _d === void 0 ? void 0 : _d[1]) || 'acid8', -0.5, () => { var _a, _b; return (_b = (_a = settings.trackVolumes) === null || _a === void 0 ? void 0 : _a[1]) !== null && _b !== void 0 ? _b : 1; }, false),
-        buildSynth(((_e = settings.trackSynths) === null || _e === void 0 ? void 0 : _e[2]) || 'acid8', 0, () => { var _a, _b; return (_b = (_a = settings.trackVolumes) === null || _a === void 0 ? void 0 : _a[2]) !== null && _b !== void 0 ? _b : 1; }, false),
-        buildSynth(((_f = settings.trackSynths) === null || _f === void 0 ? void 0 : _f[3]) || 'acid8', 0.5, () => { var _a, _b; return (_b = (_a = settings.trackVolumes) === null || _a === void 0 ? void 0 : _a[3]) !== null && _b !== void 0 ? _b : 1; }, false),
-        buildSynth('drums', 0, () => { var _a, _b; return (_b = (_a = settings.trackVolumes) === null || _a === void 0 ? void 0 : _a[4]) !== null && _b !== void 0 ? _b : 1; }, true)
-    ];
+    function rebuildSynths() {
+        var _a, _b, _c, _d;
+        normalizeTrackSynths();
+        synths = [
+            buildSynth(((_a = settings.trackSynths) === null || _a === void 0 ? void 0 : _a[0]) || 'bass', 0, () => { var _a, _b; return (_b = (_a = settings.trackVolumes) === null || _a === void 0 ? void 0 : _a[0]) !== null && _b !== void 0 ? _b : 1; }, false),
+            buildSynth(((_b = settings.trackSynths) === null || _b === void 0 ? void 0 : _b[1]) || 'acid8', -0.5, () => { var _a, _b; return (_b = (_a = settings.trackVolumes) === null || _a === void 0 ? void 0 : _a[1]) !== null && _b !== void 0 ? _b : 1; }, false),
+            buildSynth(((_c = settings.trackSynths) === null || _c === void 0 ? void 0 : _c[2]) || 'square', 0, () => { var _a, _b; return (_b = (_a = settings.trackVolumes) === null || _a === void 0 ? void 0 : _a[2]) !== null && _b !== void 0 ? _b : 1; }, false),
+            buildSynth(((_d = settings.trackSynths) === null || _d === void 0 ? void 0 : _d[3]) || 'triangle', 0.5, () => { var _a, _b; return (_b = (_a = settings.trackVolumes) === null || _a === void 0 ? void 0 : _a[3]) !== null && _b !== void 0 ? _b : 1; }, false),
+            buildSynth('drums', 0, () => { var _a, _b; return (_b = (_a = settings.trackVolumes) === null || _a === void 0 ? void 0 : _a[4]) !== null && _b !== void 0 ? _b : 1; }, true)
+        ];
+    }
+    let synths = [];
+    rebuildSynths();
     function currentContext() {
         var _a;
         return {
@@ -410,18 +436,11 @@ function start() {
             const idx = parseInt(sel.dataset.track || '0', 10);
             sel.value = settings.trackSynths[idx] || (idx === 4 ? 'drums' : 'acid8');
             sel.onchange = () => {
-                var _a, _b, _c, _d;
                 const val = sel.value;
                 stopTrack(idx);
                 settings.trackSynths[idx] = val;
-                // rebuild synths to apply new instrument immediately
-                synths = [
-                    buildSynth(((_a = settings.trackSynths) === null || _a === void 0 ? void 0 : _a[0]) || 'acid8', 0, () => { var _a, _b; return (_b = (_a = settings.trackVolumes) === null || _a === void 0 ? void 0 : _a[0]) !== null && _b !== void 0 ? _b : 1; }, false),
-                    buildSynth(((_b = settings.trackSynths) === null || _b === void 0 ? void 0 : _b[1]) || 'acid8', -0.5, () => { var _a, _b; return (_b = (_a = settings.trackVolumes) === null || _a === void 0 ? void 0 : _a[1]) !== null && _b !== void 0 ? _b : 1; }, false),
-                    buildSynth(((_c = settings.trackSynths) === null || _c === void 0 ? void 0 : _c[2]) || 'acid8', 0, () => { var _a, _b; return (_b = (_a = settings.trackVolumes) === null || _a === void 0 ? void 0 : _a[2]) !== null && _b !== void 0 ? _b : 1; }, false),
-                    buildSynth(((_d = settings.trackSynths) === null || _d === void 0 ? void 0 : _d[3]) || 'acid8', 0.5, () => { var _a, _b; return (_b = (_a = settings.trackVolumes) === null || _a === void 0 ? void 0 : _a[3]) !== null && _b !== void 0 ? _b : 1; }, false),
-                    buildSynth('drums', 0, () => { var _a, _b; return (_b = (_a = settings.trackVolumes) === null || _a === void 0 ? void 0 : _a[4]) !== null && _b !== void 0 ? _b : 1; }, true)
-                ];
+                const prev = synths;
+                rebuildSynthsPreserve(prev);
                 stopTrack(idx);
                 persistState();
             };
@@ -434,9 +453,29 @@ function start() {
     const silentNote = { note: '---' };
     const silentDrum = { drum: '---' };
     function stopTrack(idx) {
-        var _a;
+        const synth = synths[idx];
+        if (synth === null || synth === void 0 ? void 0 : synth.stop) {
+            synth.stop();
+            return;
+        }
         const isDrum = idx === 4;
-        (_a = synths[idx]) === null || _a === void 0 ? void 0 : _a.play(isDrum ? silentDrum : silentNote);
+        synth === null || synth === void 0 ? void 0 : synth.play(isDrum ? silentDrum : silentNote);
+    }
+    function disposeTrack(idx) {
+        const synth = synths[idx];
+        if (synth === null || synth === void 0 ? void 0 : synth.dispose) {
+            synth.dispose();
+        }
+    }
+    function rebuildSynthsPreserve(prev) {
+        if (prev) {
+            prev.forEach((s) => { var _a, _b; try {
+                (_a = s === null || s === void 0 ? void 0 : s.stop) === null || _a === void 0 ? void 0 : _a.call(s);
+                (_b = s === null || s === void 0 ? void 0 : s.dispose) === null || _b === void 0 ? void 0 : _b.call(s);
+            }
+            catch (_c) { } });
+        }
+        rebuildSynths();
     }
     function effectiveBpm() {
         return Math.max(40, Math.round(state.bpm * settings.tempo));
@@ -479,7 +518,9 @@ function start() {
     const bpmValue = document.getElementById("bpm-value");
     const tempoValue = document.getElementById("tempo-value");
     const noteGrid = document.getElementById("note-grid");
-    const randomizeButton = document.getElementById("randomize");
+    const randomizeSettingsButton = document.getElementById("randomize-settings");
+    const randomizePatternsButton = document.getElementById("randomize-patterns");
+    const randomizeKeysButton = document.getElementById("randomize-keys");
     const playToggle = document.getElementById("play-toggle");
     const infoToggle = document.getElementById("info-toggle");
     const howtoToggle = document.getElementById("howto-toggle");
@@ -654,7 +695,7 @@ function start() {
         persistState();
     }
     if (keySelect) {
-        keySelect.value = String((_g = settings.keyOverride) !== null && _g !== void 0 ? _g : state.key);
+        keySelect.value = String((_c = settings.keyOverride) !== null && _c !== void 0 ? _c : state.key);
         keySelect.addEventListener("change", () => applySettings());
     }
     if (minOctaveSelect) {
@@ -712,18 +753,9 @@ function start() {
             applySettings();
         });
     });
-    if (randomizeButton) {
-        randomizeButton.addEventListener("click", () => {
-            var _a;
-            // Prefer heavy/low defaults and minor-ish note masks (D minor by default key=5)
-            if (advancedConfig.randomize.key && !settings.locks.key) {
-                state.key = choose([5, 5, 5, 0, 10, 3]);
-                settings.keyOverride = state.key;
-            }
-            if (advancedConfig.randomize.progression) {
-                state.scale = music.scales.minor;
-                state.progression = choose(progressions);
-            }
+    const synthChoices = ['acid8', 'acid', 'bass', 'square', 'saw', 'rev-saw', 'triangle', 'sine'];
+    if (randomizeSettingsButton) {
+        randomizeSettingsButton.addEventListener("click", () => {
             if (advancedConfig.randomize.bpm && !settings.locks.bpm) {
                 const { min, max } = safeRange(advancedConfig.bpm, defaultAdvancedConfig.bpm);
                 state.bpm = Math.floor(rnd() * (max - min + 1)) + min;
@@ -743,19 +775,15 @@ function start() {
                 const { min, max } = safeRange(advancedConfig.tempo, defaultAdvancedConfig.tempo);
                 settings.tempo = Math.round((min + rnd() * (max - min)) * 100) / 100;
             }
-            if (advancedConfig.randomize.keys && !settings.locks.keys) {
-                settings.noteMask = new Array(12).fill(false).map((_, i) => [0, 2, 3, 5, 7, 8, 10].includes(i) ? rnd() > 0.1 : rnd() > 0.75);
-                if (!settings.noteMask.some(Boolean)) {
-                    settings.noteMask[0] = true;
-                    settings.noteMask[5] = true;
-                }
-            }
             if (advancedConfig.randomize.tracks && !settings.locks.tracks)
                 settings.trackEnabled = settings.trackEnabled.map(() => rnd() > 0.1);
             settings.trackEnabled.forEach((enabled, idx) => { if (!enabled)
                 stopTrack(idx); });
-            if (keySelect)
-                keySelect.value = String((_a = settings.keyOverride) !== null && _a !== void 0 ? _a : state.key);
+            if (advancedConfig.randomize.instruments) {
+                settings.trackSynths = settings.trackSynths.map((_unused, idx) => idx === 4 ? 'drums' : choose(synthChoices));
+                normalizeTrackSynths();
+                rebuildSynthsPreserve(synths);
+            }
             if (minOctaveSelect)
                 minOctaveSelect.value = String(settings.minOctave);
             if (maxOctaveSelect)
@@ -768,6 +796,33 @@ function start() {
                 tempoSlider.value = String(Math.round(settings.tempo * 100));
             if (tempoValue)
                 tempoValue.textContent = `${Math.round(settings.tempo * 100)}%`;
+            trackToggles.forEach((toggle, i) => {
+                if (toggle)
+                    toggle.checked = settings.trackEnabled[i];
+            });
+            applySettings();
+        });
+    }
+    if (randomizeKeysButton) {
+        randomizeKeysButton.addEventListener("click", () => {
+            var _a;
+            if (advancedConfig.randomize.key && !settings.locks.key) {
+                state.key = choose([5, 5, 5, 0, 10, 3]);
+                settings.keyOverride = state.key;
+            }
+            if (advancedConfig.randomize.progression) {
+                state.scale = music.scales.minor;
+                state.progression = choose(progressions);
+            }
+            if (advancedConfig.randomize.keys && !settings.locks.keys) {
+                settings.noteMask = new Array(12).fill(false).map((_, i) => [0, 2, 3, 5, 7, 8, 10].includes(i) ? rnd() > 0.1 : rnd() > 0.75);
+                if (!settings.noteMask.some(Boolean)) {
+                    settings.noteMask[0] = true;
+                    settings.noteMask[5] = true;
+                }
+            }
+            if (keySelect)
+                keySelect.value = String((_a = settings.keyOverride) !== null && _a !== void 0 ? _a : state.key);
             if (noteGrid) {
                 const inputs = Array.from(noteGrid.querySelectorAll("input[type='checkbox']"));
                 inputs.forEach((input, i) => {
@@ -775,11 +830,25 @@ function start() {
                     input.checked = (_a = settings.noteMask[i]) !== null && _a !== void 0 ? _a : true;
                 });
             }
-            trackToggles.forEach((toggle, i) => {
-                if (toggle)
-                    toggle.checked = settings.trackEnabled[i];
-            });
             applySettings();
+        });
+    }
+    if (randomizePatternsButton) {
+        randomizePatternsButton.addEventListener("click", () => {
+            // new seed to change Pattern ID while staying in playback
+            state.seedCode = hex(rndInt(255)) + hex(rndInt(255)) + hex(rndInt(255)) + hex(rndInt(255));
+            seedRNG(state.seedCode);
+            newPatterns();
+            if (!settings.locks.tracks) {
+                settings.trackEnabled = settings.trackEnabled.map(() => rnd() > 0.2);
+                settings.trackEnabled.forEach((enabled, idx) => { if (!enabled)
+                    stopTrack(idx); });
+                trackToggles.forEach((toggle, i) => { if (toggle)
+                    toggle.checked = settings.trackEnabled[i]; });
+            }
+            updateDisplay();
+            afterDisplayUpdate();
+            persistState();
         });
     }
     if (playToggle) {
@@ -794,6 +863,8 @@ function start() {
                 synths[2].play(silentNote);
                 synths[3].play(silentNote);
                 synths[4].play(silentDrum);
+                // fully dispose and rebuild to clear any stuck voices
+                rebuildSynthsPreserve(synths);
             }
             else {
                 playing = true;
@@ -1229,7 +1300,8 @@ function start() {
         const payload = {
             settings: {
                 trackVolumes: settings.trackVolumes,
-                trackEnabled: settings.trackEnabled
+                trackEnabled: settings.trackEnabled,
+                trackSynths: settings.trackSynths
             },
             advanced: {
                 version: 1,
@@ -1257,6 +1329,11 @@ function start() {
                 settings.trackEnabled = next.settings.trackEnabled.map((v) => Boolean(v));
                 trackToggles.forEach((t, i) => { var _a; if (t)
                     t.checked = (_a = settings.trackEnabled[i]) !== null && _a !== void 0 ? _a : true; });
+            }
+            if (Array.isArray(next.settings.trackSynths)) {
+                settings.trackSynths = next.settings.trackSynths.map((v, idx) => idx === 4 ? 'drums' : String(v || 'acid8'));
+                normalizeTrackSynths();
+                rebuildSynthsPreserve(synths);
             }
         }
     }

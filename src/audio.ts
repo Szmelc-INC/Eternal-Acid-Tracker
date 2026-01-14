@@ -5,7 +5,7 @@
 */
 import {fill, rnd} from './utils.js'
 
-type Synth<T> = { play: (note: T) => void}
+type Synth<T> = { play: (note: T) => void; stop?: () => void; dispose?: () => void }
 
 const A3Frequency = 440;
 const A0Frequency = A3Frequency / 8;
@@ -90,7 +90,19 @@ function Audio(ctx: AudioContext) {
             set(width, note.fx?.pulseWidth ?? 0.0);
         }
 
-        return {play}
+        function stop() {
+            set(gain, 0);
+        }
+        function dispose() {
+            try { wavetableTrigger.stop(); } catch {}
+            try { outputPanner.disconnect(); } catch {}
+            try { pulseOutputGain.disconnect(); } catch {}
+            try { wavetableOffsetGain.disconnect(); } catch {}
+            try { pulseWavetable.disconnect(); } catch {}
+            try { alwaysOneWavetable.disconnect(); } catch {}
+        }
+
+        return {play, stop, dispose}
     }
 
     function distortionCurve(amount: number) {
@@ -172,7 +184,21 @@ function Audio(ctx: AudioContext) {
             }
         }
 
-        return {play}
+        function stop() {
+            set(gain, 0);
+        }
+        function dispose() {
+            try { osc.stop(); } catch {}
+            try { sub.stop(); } catch {}
+            try { outputPanner.disconnect(); } catch {}
+            try { outputGain.disconnect(); } catch {}
+            try { drive.disconnect(); } catch {}
+            try { filter.disconnect(); } catch {}
+            try { oscGain.disconnect(); } catch {}
+            try { subGain.disconnect(); } catch {}
+        }
+
+        return {play, stop, dispose}
     }
 
     function OscSynth(kind: OscillatorType, pan: number = 0, volumeRef: () => number = () => 1, invert: boolean = false): Synth<Note> {
@@ -207,10 +233,17 @@ function Audio(ctx: AudioContext) {
             }
         }
 
-        return {play};
-    }
+        function stop() {
+            gain.gain.setValueAtTime(0, ctx.currentTime);
+        }
+        function dispose() {
+            try { osc.stop(); } catch {}
+            try { panner.disconnect(); } catch {}
+            try { gain.disconnect(); } catch {}
+        }
 
-    return {SquareSynth, AcidSynth, DrumSynth, OscSynth}
+        return {play, stop, dispose};
+    }
 
     function DrumSynth(volumeRef: () => number = () => 1): Synth<Drum> {
         const toneOscillator = oscillatorNode("square", 55),
@@ -263,10 +296,22 @@ function Audio(ctx: AudioContext) {
                 noiseGain.gain.setValueCurveAtTime(new Float32Array([0.2 * vel,0.15 * vel,0.0]), ctx.currentTime, 0.15);
             }
         }
-        return {
-            play,
+        function stop() {
+            toneGain.gain.setValueAtTime(0, ctx.currentTime);
+            noiseGain.gain.setValueAtTime(0, ctx.currentTime);
         }
+        function dispose() {
+            try { toneOscillator.stop(); } catch {}
+            try { noiseWavetableTrigger.stop(); } catch {}
+            try { toneGain.disconnect(); } catch {}
+            try { noiseGain.disconnect(); } catch {}
+            try { noisePan.disconnect(); } catch {}
+        }
+
+        return {play, stop, dispose}
     }
+
+    return {SquareSynth, AcidSynth, DrumSynth, OscSynth}
     return {
         SquareSynth,
         AcidSynth,

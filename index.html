@@ -278,9 +278,9 @@
             background: rgba(102,153,255,0.25);
         }
         #lock-pane {
-            position: fixed;
-            top: 12px;
-            right: 255px;
+            position: absolute;
+            top: 0;
+            right: calc(100% + 3px);
             z-index: 10;
             background-color: #111111;
             border: 2px solid #6699FF;
@@ -602,7 +602,9 @@
         <label><input type="checkbox" id="track-5" checked>5</label>
         </div>
 
-        <button id="randomize">Randomize</button>
+        <button id="randomize-settings">Randomize Settings</button>
+        <button id="randomize-patterns">Randomize Patterns</button>
+        <button id="randomize-keys">Randomize Keys</button>
         <button id="play-toggle">Pause</button>
 
         <div id="history-panel">
@@ -610,16 +612,16 @@
             <ul id="history-list"></ul>
         </div>
     </div>
-</div>
-<div id="lock-pane">
-    <div class="title">🔒</div>
-    <label>Key <input type="checkbox" id="lock-pane-key"></label>
-    <label>Min <input type="checkbox" id="lock-pane-range-min"></label>
-    <label>Max <input type="checkbox" id="lock-pane-range-max"></label>
-    <label>BPM <input type="checkbox" id="lock-pane-bpm"></label>
-    <label>Tempo <input type="checkbox" id="lock-pane-tempo"></label>
-    <label>Keys <input type="checkbox" id="lock-pane-keys"></label>
-    <label>Tracks <input type="checkbox" id="lock-pane-tracks"></label>
+    <div id="lock-pane">
+        <div class="title">🔒</div>
+        <label>Key <input type="checkbox" id="lock-pane-key"></label>
+        <label>Min <input type="checkbox" id="lock-pane-range-min"></label>
+        <label>Max <input type="checkbox" id="lock-pane-range-max"></label>
+        <label>BPM <input type="checkbox" id="lock-pane-bpm"></label>
+        <label>Tempo <input type="checkbox" id="lock-pane-tempo"></label>
+        <label>Keys <input type="checkbox" id="lock-pane-keys"></label>
+        <label>Tracks <input type="checkbox" id="lock-pane-tracks"></label>
+    </div>
 </div>
 
 <div id="history-popup" class="popup-surface">

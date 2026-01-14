@@ -97,7 +97,7 @@ const defaultStoredState: StoredState = {
         tempo: 1,
         trackEnabled: [true, true, true, true, true],
         trackVolumes: [1,1,1,1,1],
-        trackSynths: ["acid8","acid8","acid8","acid8","drums"],
+        trackSynths: ["bass","acid8","square","triangle","drums"],
         locks: {
             key: false,
             rangeMin: false,
@@ -117,7 +117,8 @@ const defaultStoredState: StoredState = {
             range: true,
             keys: true,
             tracks: true,
-            progression: true
+            progression: true,
+            instruments: false
         },
         bpm: { min: 70, max: 160 },
         tempo: { min: 0.75, max: 1.25 },
@@ -291,15 +292,35 @@ function start() {
         trackSynths: stored.settings.trackSynths ?? defaultStoredState.settings.trackSynths
     }));
 
+    function normalizeTrackSynths() {
+        const defaults = defaultStoredState.settings.trackSynths;
+        if (!Array.isArray(settings.trackSynths)) {
+            settings.trackSynths = [...defaults];
+            return;
+        }
+        settings.trackSynths = settings.trackSynths.map((v: any, idx: number) => {
+            const fallback = defaults[idx] || (idx === 4 ? 'drums' : 'acid8');
+            if (idx === 4) return 'drums';
+            const val = String(v || fallback);
+            return val;
+        });
+        if (settings.trackSynths.length < defaults.length) {
+            settings.trackSynths = settings.trackSynths.concat(defaults.slice(settings.trackSynths.length));
+        }
+        settings.trackSynths = settings.trackSynths.slice(0, defaults.length);
+    }
+
+    normalizeTrackSynths();
+
     const favorites: { code: SaveCode; settings: any; createdAt: number }[] = [...stored.favorites];
 
     const defaultAdvancedConfig = JSON.parse(JSON.stringify({
         ...defaultStoredState.advanced,
         trackSynths: [
-            { type: "acid8", detune: -0.25, drive: 260, filterQ: 14, level: 0.22 },
+            { type: "bass", detune: -0.25, drive: 260, filterQ: 14, level: 0.22 },
             { type: "acid8", detune: 0, drive: 230, filterQ: 12, level: 0.2 },
-            { type: "acid8", detune: 0.25, drive: 260, filterQ: 14, level: 0.22 },
-            { type: "acid8", detune: 0.5, drive: 260, filterQ: 14, level: 0.22 },
+            { type: "square", detune: 0.1, drive: 200, filterQ: 10, level: 0.18 },
+            { type: "triangle", detune: 0.2, drive: 180, filterQ: 8, level: 0.16 },
             { type: "drums", level: 0.3 }
         ],
         layout: {
@@ -338,13 +359,19 @@ function start() {
         }
     }
 
-    let synths: SynthsType<FourChannelsPlusDrums> = [
-        buildSynth(settings.trackSynths?.[0] || 'acid8', 0, () => settings.trackVolumes?.[0] ?? 1, false) as any,
-        buildSynth(settings.trackSynths?.[1] || 'acid8', -0.5, () => settings.trackVolumes?.[1] ?? 1, false) as any,
-        buildSynth(settings.trackSynths?.[2] || 'acid8', 0, () => settings.trackVolumes?.[2] ?? 1, false) as any,
-        buildSynth(settings.trackSynths?.[3] || 'acid8', 0.5, () => settings.trackVolumes?.[3] ?? 1, false) as any,
-        buildSynth('drums', 0, () => settings.trackVolumes?.[4] ?? 1, true) as any
-    ];
+    function rebuildSynths() {
+        normalizeTrackSynths();
+        synths = [
+            buildSynth(settings.trackSynths?.[0] || 'bass', 0, () => settings.trackVolumes?.[0] ?? 1, false) as any,
+            buildSynth(settings.trackSynths?.[1] || 'acid8', -0.5, () => settings.trackVolumes?.[1] ?? 1, false) as any,
+            buildSynth(settings.trackSynths?.[2] || 'square', 0, () => settings.trackVolumes?.[2] ?? 1, false) as any,
+            buildSynth(settings.trackSynths?.[3] || 'triangle', 0.5, () => settings.trackVolumes?.[3] ?? 1, false) as any,
+            buildSynth('drums', 0, () => settings.trackVolumes?.[4] ?? 1, true) as any
+        ];
+    }
+
+    let synths: SynthsType<FourChannelsPlusDrums> = [] as any;
+    rebuildSynths();
 
     function currentContext(): { progression: Progression, key: Key, scale: Scale, minOctave: number, maxOctave: number, noteMask: boolean[] } {
         return {
@@ -468,14 +495,8 @@ function start() {
                 const val = sel.value;
                 stopTrack(idx);
                 settings.trackSynths[idx] = val;
-                // rebuild synths to apply new instrument immediately
-                synths = [
-                    buildSynth(settings.trackSynths?.[0] || 'acid8', 0, () => settings.trackVolumes?.[0] ?? 1, false) as any,
-                    buildSynth(settings.trackSynths?.[1] || 'acid8', -0.5, () => settings.trackVolumes?.[1] ?? 1, false) as any,
-                    buildSynth(settings.trackSynths?.[2] || 'acid8', 0, () => settings.trackVolumes?.[2] ?? 1, false) as any,
-                    buildSynth(settings.trackSynths?.[3] || 'acid8', 0.5, () => settings.trackVolumes?.[3] ?? 1, false) as any,
-                    buildSynth('drums', 0, () => settings.trackVolumes?.[4] ?? 1, true) as any
-                ];
+                const prev = synths as any[];
+                rebuildSynthsPreserve(prev);
                 stopTrack(idx);
                 persistState();
             };
@@ -491,8 +512,27 @@ function start() {
     const silentDrum = {drum: '---'} as Drum;
 
     function stopTrack(idx: number) {
+        const synth: any = synths[idx];
+        if (synth?.stop) {
+            synth.stop();
+            return;
+        }
         const isDrum = idx === 4;
-        synths[idx]?.play(isDrum ? silentDrum : silentNote as any);
+        synth?.play(isDrum ? silentDrum : silentNote as any);
+    }
+
+    function disposeTrack(idx: number) {
+        const synth: any = synths[idx];
+        if (synth?.dispose) {
+            synth.dispose();
+        }
+    }
+
+    function rebuildSynthsPreserve(prev?: any[]) {
+        if (prev) {
+            prev.forEach((s) => { try { s?.stop?.(); s?.dispose?.(); } catch {} });
+        }
+        rebuildSynths();
     }
 
     function effectiveBpm() {
@@ -539,7 +579,9 @@ function start() {
     const bpmValue = document.getElementById("bpm-value");
     const tempoValue = document.getElementById("tempo-value");
     const noteGrid = document.getElementById("note-grid");
-    const randomizeButton = document.getElementById("randomize") as HTMLButtonElement | null;
+    const randomizeSettingsButton = document.getElementById("randomize-settings") as HTMLButtonElement | null;
+    const randomizePatternsButton = document.getElementById("randomize-patterns") as HTMLButtonElement | null;
+    const randomizeKeysButton = document.getElementById("randomize-keys") as HTMLButtonElement | null;
     const playToggle = document.getElementById("play-toggle") as HTMLButtonElement | null;
     const infoToggle = document.getElementById("info-toggle") as HTMLButtonElement | null;
     const howtoToggle = document.getElementById("howto-toggle") as HTMLButtonElement | null;
@@ -746,17 +788,10 @@ function start() {
             applySettings();
         });
     });
-    if (randomizeButton) {
-        randomizeButton.addEventListener("click", () => {
-            // Prefer heavy/low defaults and minor-ish note masks (D minor by default key=5)
-            if (advancedConfig.randomize.key && !settings.locks.key) {
-                state.key = choose([5, 5, 5, 0, 10, 3]) as Key;
-                settings.keyOverride = state.key;
-            }
-            if (advancedConfig.randomize.progression) {
-                state.scale = music.scales.minor;
-                state.progression = choose(progressions);
-            }
+    const synthChoices = ['acid8','acid','bass','square','saw','rev-saw','triangle','sine'];
+
+    if (randomizeSettingsButton) {
+        randomizeSettingsButton.addEventListener("click", () => {
             if (advancedConfig.randomize.bpm && !settings.locks.bpm) {
                 const {min, max} = safeRange(advancedConfig.bpm, defaultAdvancedConfig.bpm);
                 state.bpm = Math.floor(rnd() * (max - min + 1)) + min;
@@ -774,6 +809,39 @@ function start() {
                 const {min, max} = safeRange(advancedConfig.tempo, defaultAdvancedConfig.tempo);
                 settings.tempo = Math.round((min + rnd() * (max - min)) * 100) / 100;
             }
+            if (advancedConfig.randomize.tracks && !settings.locks.tracks) settings.trackEnabled = settings.trackEnabled.map(() => rnd() > 0.1);
+            settings.trackEnabled.forEach((enabled: boolean, idx: number) => { if (!enabled) stopTrack(idx); });
+
+            if (advancedConfig.randomize.instruments) {
+                settings.trackSynths = settings.trackSynths.map((_unused: string, idx: number) => idx === 4 ? 'drums' : choose(synthChoices));
+                normalizeTrackSynths();
+                rebuildSynthsPreserve(synths as any[]);
+            }
+
+            if (minOctaveSelect) minOctaveSelect.value = String(settings.minOctave);
+            if (maxOctaveSelect) maxOctaveSelect.value = String(settings.maxOctave);
+            if (bpmSlider) bpmSlider.value = String(state.bpm);
+            if (bpmValue) bpmValue.textContent = String(state.bpm);
+            if (tempoSlider) tempoSlider.value = String(Math.round(settings.tempo * 100));
+            if (tempoValue) tempoValue.textContent = `${Math.round(settings.tempo * 100)}%`;
+            trackToggles.forEach((toggle, i) => {
+                if (toggle) toggle.checked = settings.trackEnabled[i];
+            });
+
+            applySettings();
+        });
+    }
+
+    if (randomizeKeysButton) {
+        randomizeKeysButton.addEventListener("click", () => {
+            if (advancedConfig.randomize.key && !settings.locks.key) {
+                state.key = choose([5, 5, 5, 0, 10, 3]) as Key;
+                settings.keyOverride = state.key;
+            }
+            if (advancedConfig.randomize.progression) {
+                state.scale = music.scales.minor;
+                state.progression = choose(progressions);
+            }
             if (advancedConfig.randomize.keys && !settings.locks.keys) {
                 settings.noteMask = new Array(12).fill(false).map((_, i) => [0,2,3,5,7,8,10].includes(i) ? rnd() > 0.1 : rnd() > 0.75);
                 if (!settings.noteMask.some(Boolean)) {
@@ -781,27 +849,31 @@ function start() {
                     settings.noteMask[5] = true;
                 }
             }
-            if (advancedConfig.randomize.tracks && !settings.locks.tracks) settings.trackEnabled = settings.trackEnabled.map(() => rnd() > 0.1);
-            settings.trackEnabled.forEach((enabled: boolean, idx: number) => { if (!enabled) stopTrack(idx); });
-
             if (keySelect) keySelect.value = String(settings.keyOverride ?? state.key);
-            if (minOctaveSelect) minOctaveSelect.value = String(settings.minOctave);
-            if (maxOctaveSelect) maxOctaveSelect.value = String(settings.maxOctave);
-            if (bpmSlider) bpmSlider.value = String(state.bpm);
-            if (bpmValue) bpmValue.textContent = String(state.bpm);
-            if (tempoSlider) tempoSlider.value = String(Math.round(settings.tempo * 100));
-            if (tempoValue) tempoValue.textContent = `${Math.round(settings.tempo * 100)}%`;
             if (noteGrid) {
                 const inputs = Array.from(noteGrid.querySelectorAll("input[type='checkbox']")) as HTMLInputElement[];
                 inputs.forEach((input, i) => {
                     input.checked = settings.noteMask[i] ?? true;
                 });
             }
-            trackToggles.forEach((toggle, i) => {
-                if (toggle) toggle.checked = settings.trackEnabled[i];
-            });
-
             applySettings();
+        });
+    }
+
+    if (randomizePatternsButton) {
+        randomizePatternsButton.addEventListener("click", () => {
+            // new seed to change Pattern ID while staying in playback
+            state.seedCode = hex(rndInt(255)) +hex(rndInt(255)) + hex(rndInt(255)) + hex(rndInt(255));
+            seedRNG(state.seedCode);
+            newPatterns();
+            if (!settings.locks.tracks) {
+                settings.trackEnabled = settings.trackEnabled.map(() => rnd() > 0.2);
+                settings.trackEnabled.forEach((enabled: boolean, idx: number) => { if (!enabled) stopTrack(idx); });
+                trackToggles.forEach((toggle, i) => { if (toggle) toggle.checked = settings.trackEnabled[i]; });
+            }
+            updateDisplay();
+            afterDisplayUpdate();
+            persistState();
         });
     }
     if (playToggle) {
@@ -816,6 +888,8 @@ function start() {
                 synths[2].play(silentNote);
                 synths[3].play(silentNote);
                 synths[4].play(silentDrum);
+                // fully dispose and rebuild to clear any stuck voices
+                rebuildSynthsPreserve(synths as any[]);
             } else {
                 playing = true;
                 playToggle.textContent = "Pause";
@@ -1192,7 +1266,8 @@ function start() {
         const payload = {
             settings: {
                 trackVolumes: settings.trackVolumes,
-                trackEnabled: settings.trackEnabled
+                trackEnabled: settings.trackEnabled,
+                trackSynths: settings.trackSynths
             },
             advanced: {
                 version: 1,
@@ -1222,6 +1297,11 @@ function start() {
             if (Array.isArray(next.settings.trackEnabled)) {
                 settings.trackEnabled = next.settings.trackEnabled.map((v: any) => Boolean(v));
                 trackToggles.forEach((t, i) => { if (t) t.checked = settings.trackEnabled[i] ?? true; });
+            }
+            if (Array.isArray(next.settings.trackSynths)) {
+                settings.trackSynths = next.settings.trackSynths.map((v: any, idx: number) => idx === 4 ? 'drums' : String(v || 'acid8'));
+                normalizeTrackSynths();
+                rebuildSynthsPreserve(synths as any[]);
             }
         }
     }

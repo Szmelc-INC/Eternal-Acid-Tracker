@@ -76,7 +76,36 @@ function Audio(ctx) {
             }
             set(width, (_c = (_b = note.fx) === null || _b === void 0 ? void 0 : _b.pulseWidth) !== null && _c !== void 0 ? _c : 0.0);
         }
-        return { play };
+        function stop() {
+            set(gain, 0);
+        }
+        function dispose() {
+            try {
+                wavetableTrigger.stop();
+            }
+            catch (_a) { }
+            try {
+                outputPanner.disconnect();
+            }
+            catch (_b) { }
+            try {
+                pulseOutputGain.disconnect();
+            }
+            catch (_c) { }
+            try {
+                wavetableOffsetGain.disconnect();
+            }
+            catch (_d) { }
+            try {
+                pulseWavetable.disconnect();
+            }
+            catch (_e) { }
+            try {
+                alwaysOneWavetable.disconnect();
+            }
+            catch (_f) { }
+        }
+        return { play, stop, dispose };
     }
     function distortionCurve(amount) {
         const k = Math.max(1, amount);
@@ -138,7 +167,44 @@ function Audio(ctx) {
                 noteOn(note.note, (_d = (_c = note.fx) === null || _c === void 0 ? void 0 : _c.glide) !== null && _d !== void 0 ? _d : 0, bite);
             }
         }
-        return { play };
+        function stop() {
+            set(gain, 0);
+        }
+        function dispose() {
+            try {
+                osc.stop();
+            }
+            catch (_a) { }
+            try {
+                sub.stop();
+            }
+            catch (_b) { }
+            try {
+                outputPanner.disconnect();
+            }
+            catch (_c) { }
+            try {
+                outputGain.disconnect();
+            }
+            catch (_d) { }
+            try {
+                drive.disconnect();
+            }
+            catch (_e) { }
+            try {
+                filter.disconnect();
+            }
+            catch (_f) { }
+            try {
+                oscGain.disconnect();
+            }
+            catch (_g) { }
+            try {
+                subGain.disconnect();
+            }
+            catch (_h) { }
+        }
+        return { play, stop, dispose };
     }
     function OscSynth(kind, pan = 0, volumeRef = () => 1, invert = false) {
         const osc = oscillatorNode(kind);
@@ -170,9 +236,25 @@ function Audio(ctx) {
                 noteOn(note.note);
             }
         }
-        return { play };
+        function stop() {
+            gain.gain.setValueAtTime(0, ctx.currentTime);
+        }
+        function dispose() {
+            try {
+                osc.stop();
+            }
+            catch (_a) { }
+            try {
+                panner.disconnect();
+            }
+            catch (_b) { }
+            try {
+                gain.disconnect();
+            }
+            catch (_c) { }
+        }
+        return { play, stop, dispose };
     }
-    return { SquareSynth, AcidSynth, DrumSynth, OscSynth };
     function DrumSynth(volumeRef = () => 1) {
         const toneOscillator = oscillatorNode("square", 55), toneGain = gainNode(), noiseWavetableTrigger = oscillatorNode("sawtooth", 20), noiseWavetable = waveShaperNode(fill(1024, x => rnd() * 2 - 1)), noiseGain = gainNode(), noisePan = stereoPannerNode(0);
         toneOscillator.start();
@@ -215,10 +297,35 @@ function Audio(ctx) {
                 noiseGain.gain.setValueCurveAtTime(new Float32Array([0.2 * vel, 0.15 * vel, 0.0]), ctx.currentTime, 0.15);
             }
         }
-        return {
-            play,
-        };
+        function stop() {
+            toneGain.gain.setValueAtTime(0, ctx.currentTime);
+            noiseGain.gain.setValueAtTime(0, ctx.currentTime);
+        }
+        function dispose() {
+            try {
+                toneOscillator.stop();
+            }
+            catch (_a) { }
+            try {
+                noiseWavetableTrigger.stop();
+            }
+            catch (_b) { }
+            try {
+                toneGain.disconnect();
+            }
+            catch (_c) { }
+            try {
+                noiseGain.disconnect();
+            }
+            catch (_d) { }
+            try {
+                noisePan.disconnect();
+            }
+            catch (_e) { }
+        }
+        return { play, stop, dispose };
     }
+    return { SquareSynth, AcidSynth, DrumSynth, OscSynth };
     return {
         SquareSynth,
         AcidSynth,
