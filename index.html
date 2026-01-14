@@ -1,0 +1,414 @@
+<!--Copyright 2020 David Whiting-->
+<!--This work is licensed under a Creative Commons Attribution 4.0 International License-->
+<!--https://creativecommons.org/licenses/by/4.0/-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>AutoTracker</title>
+<!--    <script type="text/javascript" src="dist/tracker.js"></script>-->
+    <script type="module" src="target/tracker.js"></script>
+<!--    <link rel="icon" type="image/png" href="images/icon.png">-->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta property="og:title" content="AutoTracker" />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://www.vitling.xyz/toys/autotracker" />
+    <meta property="og:image" content="https://www.vitling.xyz/toys/autotracker/preview.png" />
+    <meta property="og:description" content="An endless randomised algorithmic Chiptune composition by Vitling aka Demoscene Time Machine" />
+    <link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
+    <style type = "text/css">
+        .note {
+            display:block;
+            border-top: 1px dotted #444444;
+            margin-bottom: -2px;
+            height: 1em;
+            overflow: hidden;
+            max-width: 14ch;
+            padding-left: 1ch;
+            padding-right: 1ch;
+            margin-left:auto;
+            margin-right:auto;
+        }
+
+        .note:nth-of-type(4n+1) {
+            border-top: 1px dotted darkred;
+        }
+
+        .note:nth-of-type(16n+1) {
+            border-top: 1px solid darkorange;
+        }
+
+        #display {
+            max-width: 1200px;
+            margin-left: auto;
+            margin-right: auto;
+            background-color: #222222;
+        }
+
+        #display .columns {
+            display:flex; width: 100%; justify-content: space-evenly;
+        }
+
+        #display .header {
+            font-size: 2em;
+            text-align: center;
+        }
+
+        #display a.save-string {
+            color: #ef6dea;
+        }
+
+        #display code {
+            font-family: "VT323", monospace;
+            font-size: 1em;
+            width:20%;
+        }
+
+        body {
+            font-family: "VT323", monospace;
+            background-color: #000000;
+            color: #6699FF;
+        }
+        #settings-panel {
+            position: fixed;
+            top: 12px;
+            right: 12px;
+            z-index: 10;
+            background-color: #111111;
+            border: 2px solid #6699FF;
+            padding: 10px 12px;
+            font-size: 14pt;
+            text-align: left;
+            max-width: 240px;
+        }
+        #settings-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 6px;
+            margin-bottom: 6px;
+        }
+        #settings-title {
+            font-size: 16pt;
+            color: darkorange;
+            margin: 0;
+        }
+        #settings-actions {
+            display: inline-flex;
+            gap: 4px;
+        }
+        #settings-actions button {
+            width: 28px;
+            height: 28px;
+            line-height: 24px;
+            font-size: 14pt;
+            padding: 0;
+            border: 2px solid #6699FF;
+            background-color: black;
+            color: darkorange;
+            font-family: "VT323", monospace;
+            margin: 0;
+        }
+        #settings-panel label {
+            display: block;
+            margin: 4px 0;
+        }
+        #settings-panel .row {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        #settings-panel select {
+            background-color: black;
+            color: darkorange;
+            border: 1px solid #6699FF;
+            font-family: "VT323", monospace;
+            font-size: 14pt;
+            width: 100%;
+        }
+        #settings-panel input[type="range"] {
+            width: 100%;
+        }
+        #settings-panel .value {
+            color: #ef6dea;
+            min-width: 3ch;
+            text-align: right;
+        }
+        #settings-panel button {
+            background-color: black;
+            color: darkorange;
+            border: 2px solid #6699FF;
+            font-family: "VT323", monospace;
+            font-size: 16pt;
+            width: 100%;
+            margin-top: 8px;
+        }
+        #settings-panel .lock {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 11pt;
+            color: #ef6dea;
+            margin-left: 6px;
+        }
+        #note-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 4px 6px;
+            margin-top: 6px;
+        }
+        #note-grid label {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 12pt;
+            margin: 0;
+        }
+        #note-grid input {
+            accent-color: #ef6dea;
+        }
+        #track-toggles {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 4px 6px;
+            margin-top: 6px;
+        }
+        #track-toggles label {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 12pt;
+            margin: 0;
+        }
+        #history-panel {
+            display: none;
+            border-top: 1px solid #444;
+            margin-top: 8px;
+            padding-top: 6px;
+            max-height: 200px;
+            overflow: auto;
+        }
+        #history-panel ul {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+            font-size: 11pt;
+        }
+        #history-panel li {
+            border-bottom: 1px dotted #333;
+            padding: 2px 0;
+        }
+        #settings-panel.minimized #settings-content {
+            display: none;
+        }
+        #info-popup {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.85);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 20;
+        }
+        #info-popup .popup {
+            background: #111;
+            border: 2px solid #6699FF;
+            padding: 16px;
+            max-width: 640px;
+            color: #6699FF;
+            font-size: 16pt;
+        }
+        #info-popup .popup h1 {
+            font-size: 2.5em;
+            letter-spacing: 0.5ch;
+            margin: 0 0 8px 0;
+        }
+        #info-popup .popup button {
+            background-color: black;
+            color: darkorange;
+            border: 2px solid #6699FF;
+            font-family: "VT323", monospace;
+            font-size: 16pt;
+            margin-top: 12px;
+        }
+        h1 {
+            font-family: "VT323", monospace;
+            letter-spacing: 1ch;
+            font-size:4em;
+            margin:0;
+        }
+
+        .auto {
+            color: darkorange;
+        }
+        .tracker {
+            color: #ef6dea;
+        }
+        #seed-entry {
+            font-size:14pt;
+            text-align: center;
+            margin: 100px auto;
+        }
+
+        #seed-entry input,button {
+            background-color: black;
+            color: darkorange;
+            font-family: "VT323", monospace;
+        }
+
+        #seed-entry input {
+            font-size:16pt;
+            border: 2px solid #6699FF;
+        }
+
+        #seed-entry button {
+            border: 2px solid #6699FF;
+            font-size: 32pt;
+        }
+
+        a {
+            color: white;
+        }
+        p {
+            margin: 0;
+        }
+
+    </style>
+</head>
+<body>
+<div id="settings-panel">
+    <div id="settings-header">
+        <div id="settings-title">Settings</div>
+        <div id="settings-actions">
+            <button id="info-toggle">i</button>
+            <button id="history-toggle">H</button>
+            <button id="minimize-toggle">^</button>
+        </div>
+    </div>
+    <div id="settings-content">
+        <div class="row">
+            <label for="key-select">Key</label>
+            <label class="lock"><input type="checkbox" id="lock-key">lock</label>
+        </div>
+        <select id="key-select">
+        <option value="0">A</option>
+        <option value="1">A#</option>
+        <option value="2">B</option>
+        <option value="3">C</option>
+        <option value="4">C#</option>
+        <option value="5">D</option>
+        <option value="6">D#</option>
+        <option value="7">E</option>
+        <option value="8">F</option>
+        <option value="9">F#</option>
+        <option value="10">G</option>
+        <option value="11">G#</option>
+        </select>
+
+        <div class="row">
+            <label for="range-min">Range (Min Oct)</label>
+            <label class="lock"><input type="checkbox" id="lock-range-min">lock</label>
+        </div>
+        <select id="range-min">
+        <option value="-2">A-1</option>
+        <option value="-1">A0</option>
+        <option value="0">A1</option>
+        <option value="1">A2</option>
+        <option value="2">A3</option>
+        <option value="3">A4</option>
+        <option value="4">A5</option>
+        <option value="5">A6</option>
+        </select>
+
+        <div class="row">
+            <label for="range-max">Range (Max Oct)</label>
+            <label class="lock"><input type="checkbox" id="lock-range-max">lock</label>
+        </div>
+        <select id="range-max">
+        <option value="-2">A-1</option>
+        <option value="-1">A0</option>
+        <option value="0">A1</option>
+        <option value="1">A2</option>
+        <option value="2">A3</option>
+        <option value="3">A4</option>
+        <option value="4">A5</option>
+        <option value="5">A6</option>
+        <option value="6">A7</option>
+        </select>
+
+        <div class="row">
+            <label for="bpm-slider">BPM</label>
+            <label class="lock"><input type="checkbox" id="lock-bpm">lock</label>
+        </div>
+        <div class="row">
+            <input id="bpm-slider" type="range" min="60" max="180" step="1" value="112">
+            <span class="value" id="bpm-value">112</span>
+        </div>
+
+        <div class="row">
+            <label for="tempo-slider">Tempo</label>
+            <label class="lock"><input type="checkbox" id="lock-tempo">lock</label>
+        </div>
+        <div class="row">
+            <input id="tempo-slider" type="range" min="50" max="150" step="1" value="100">
+            <span class="value" id="tempo-value">100%</span>
+        </div>
+
+        <div class="row">
+            <label>Keys</label>
+            <label class="lock"><input type="checkbox" id="lock-keys">lock</label>
+        </div>
+        <div id="note-grid">
+        <label><input type="checkbox" data-note="0">A</label>
+        <label><input type="checkbox" data-note="1">A#</label>
+        <label><input type="checkbox" data-note="2">B</label>
+        <label><input type="checkbox" data-note="3">C</label>
+        <label><input type="checkbox" data-note="4">C#</label>
+        <label><input type="checkbox" data-note="5">D</label>
+        <label><input type="checkbox" data-note="6">D#</label>
+        <label><input type="checkbox" data-note="7">E</label>
+        <label><input type="checkbox" data-note="8">F</label>
+        <label><input type="checkbox" data-note="9">F#</label>
+        <label><input type="checkbox" data-note="10">G</label>
+        <label><input type="checkbox" data-note="11">G#</label>
+        </div>
+
+        <div class="row">
+            <label>Tracks</label>
+            <label class="lock"><input type="checkbox" id="lock-tracks">lock</label>
+        </div>
+        <div id="track-toggles">
+        <label><input type="checkbox" id="track-1" checked>1</label>
+        <label><input type="checkbox" id="track-2" checked>2</label>
+        <label><input type="checkbox" id="track-3" checked>3</label>
+        <label><input type="checkbox" id="track-4" checked>4</label>
+        <label><input type="checkbox" id="track-5" checked>5</label>
+        </div>
+
+        <button id="randomize">Randomize</button>
+        <button id="play-toggle">Pause</button>
+
+        <div id="history-panel">
+            <strong>History</strong>
+            <ul id="history-list"></ul>
+        </div>
+    </div>
+</div>
+<div id="info-popup">
+    <div class="popup">
+        <h1><span class="auto">AUTO</span><span class="tracker">TRACKER</span></h1>
+        <p>An endless randomised algorithmic Chiptune composition by <a href="https://www.vitling.xyz">Vitling</a> aka <a href="https://demoscenetimemachine.com/album/gravity">Demoscene Time Machine</a></p>
+        <p>Expect much better results with Firefox, Chrome or Opera, because they follow the WebAudio standard much better than Safari</p>
+        <p><a href="https://github.com/DavW/autotracker">Source Code</a></p>
+        <button id="info-close">Close</button>
+    </div>
+</div>
+<div id="display">
+<div id="seed-entry">
+    Enter Seed: <input autofocus id="seed-text" type="text" placeholder="word or phrase or savecode" size="30">
+    or leave blank for random<br><br>
+    <button id="start">Start</button>
+</div>
+</div>
+</body>
+</html>
