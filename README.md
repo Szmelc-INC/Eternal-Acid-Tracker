@@ -22,6 +22,10 @@
 >> ## > Advanced settings & Guide 
 >> <img width="971" height="533" alt="image" src="https://github.com/user-attachments/assets/dd000814-c477-4536-a735-a34e05f3b3a6" />
 >> <img width="943" height="700" alt="image" src="https://github.com/user-attachments/assets/b33a5971-4e84-4369-b890-87f8c355b7d1" />
+>>
+>> # [DEMO VIDEO ON YT](https://www.youtube.com/watch?v=qaoLgO4LwD0) 
+>>
+>> <img width="600" height="400" alt="image" src="https://github.com/user-attachments/assets/f012263d-1277-4388-9a34-b674a79f64c2" />
 >> </details>
 
 ---
